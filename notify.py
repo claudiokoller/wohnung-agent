@@ -77,7 +77,7 @@ def send_gmail_button(token: str, chat_ids: list, subject: str, body: str):
     """Sendet einen mailto:-Link der die Gmail-App mit vorausgefülltem Entwurf öffnet."""
     mailto = "mailto:?subject=" + urllib.parse.quote(subject) + "&body=" + urllib.parse.quote(body)
     text = (
-        f'✉️ <a href="{mailto}">In Gmail öffnen</a> '
+        f'✉️ <a href="{mailto}">Mail öffnen</a> '
         f"— Empfänger aus dem Portal-Kontaktformular ergänzen."
     )
     for chat_id in chat_ids:
