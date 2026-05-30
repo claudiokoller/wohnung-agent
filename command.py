@@ -235,7 +235,6 @@ def handle_callback(chat_id: str, callback_id: str, data: str):
                               phone=config.APPLICANT.get("phone", ""),
                               email=config.APPLICANT.get("email", ""))
             notify.send_blank(config.TELEGRAM_BOT_TOKEN, config.TELEGRAM_CHAT_IDS, subject_b, body_b)
-            notify.send_gmail_button(config.TELEGRAM_BOT_TOKEN, config.TELEGRAM_CHAT_IDS, subject, body)
             _answer_callback(callback_id, "📝 Entwurf gesendet!")
         except Exception as e:
             _answer_callback(callback_id, "❌ Fehler")

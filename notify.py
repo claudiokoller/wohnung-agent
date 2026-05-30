@@ -1,5 +1,4 @@
 import html
-import urllib.parse
 
 import requests
 
@@ -72,14 +71,6 @@ def send_blank(token, chat_ids, subject, body):
     for chat_id in chat_ids:
         _post(token, chat_id, msg)
 
-
-def send_gmail_button(token: str, chat_ids: list, subject: str, body: str):
-    """Inline-Button der Gmail-Compose mit vorausgefülltem Entwurf öffnet."""
-    params = urllib.parse.urlencode({"view": "cm", "su": subject, "body": body})
-    url = f"https://mail.google.com/mail/?{params}"
-    keyboard = {"inline_keyboard": [[{"text": "✉️ Mail öffnen", "url": url}]]}
-    for chat_id in chat_ids:
-        _post(token, chat_id, "Empfänger aus dem Portal-Kontaktformular ergänzen:", reply_markup=keyboard)
 
 
 def send_draft(token, chat_ids, subject, body, phone: str = "", email: str = ""):
