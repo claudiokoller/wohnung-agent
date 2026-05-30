@@ -233,7 +233,8 @@ def handle_callback(chat_id: str, callback_id: str, data: str):
             subject_b, body_b = build_blank_letter(l, config)
             notify.send_draft(config.TELEGRAM_BOT_TOKEN, config.TELEGRAM_CHAT_IDS, subject, body,
                               phone=config.APPLICANT.get("phone", ""),
-                              email=config.APPLICANT.get("email", ""))
+                              email=config.APPLICANT.get("email", ""),
+                              listing_url=l.url)
             notify.send_blank(config.TELEGRAM_BOT_TOKEN, config.TELEGRAM_CHAT_IDS, subject_b, body_b)
             _answer_callback(callback_id, "📝 Entwurf gesendet!")
         except Exception as e:

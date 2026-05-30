@@ -55,6 +55,7 @@ def _dispatch_draft(listing):
             config.TELEGRAM_BOT_TOKEN, config.TELEGRAM_CHAT_IDS, subject, body,
             phone=config.APPLICANT.get("phone", ""),
             email=config.APPLICANT.get("email", ""),
+            listing_url=listing.url,
         )
         # Option 2: leere Struktur zum manuellen Ausfüllen
         notify.send_blank(

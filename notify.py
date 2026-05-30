@@ -73,7 +73,7 @@ def send_blank(token, chat_ids, subject, body):
 
 
 
-def send_draft(token, chat_ids, subject, body, phone: str = "", email: str = ""):
+def send_draft(token, chat_ids, subject, body, phone: str = "", email: str = "", listing_url: str = ""):
     """Bewerbungs-Entwurf als kopierfreundliche Nachricht (Monospace-Block).
     Auf dem Handy lange drücken -> kopieren -> ins Portalformular einfügen."""
     contact = ""
@@ -90,5 +90,8 @@ def send_draft(token, chat_ids, subject, body, phone: str = "", email: str = "")
         f"<b>Betreff:</b> {html.escape(subject)}\n\n"
         f"<pre>{html.escape(body)}</pre>"
     )
+    keyboard = None
+    if listing_url:
+        keyboard = {"inline_keyboard": [[{"text": "🔗 Zum Kontaktformular", "url": listing_url}]]}
     for chat_id in chat_ids:
-        _post(token, chat_id, msg)
+        _post(token, chat_id, msg, reply_markup=keyboard)
