@@ -77,12 +77,14 @@ def send_blank(token, chat_ids, subject, body):
 
 
 def send_gmail_button(token: str, chat_ids: list, subject: str, body: str):
-    """Sendet einen Button der Gmail-Compose mit vorausgefülltem Betreff+Text öffnet."""
-    params = urllib.parse.urlencode({"view": "cm", "su": subject, "body": body})
-    url = f"https://mail.google.com/mail/?{params}"
-    keyboard = {"inline_keyboard": [[{"text": "✉️ In Gmail öffnen", "url": url}]]}
+    """Sendet einen mailto:-Link der die Gmail-App mit vorausgefülltem Entwurf öffnet."""
+    mailto = "mailto:?subject=" + urllib.parse.quote(subject) + "&body=" + urllib.parse.quote(body)
+    text = (
+        f'✉️ <a href="{mailto}">In Gmail öffnen</a> '
+        f"— Empfänger aus dem Portal-Kontaktformular ergänzen."
+    )
     for chat_id in chat_ids:
-        _post(token, chat_id, "✉️ <b>Entwurf in Gmail öffnen</b> — Empfänger aus dem Portal-Kontaktformular ergänzen:", reply_markup=keyboard)
+        _post(token, chat_id, text)
 
 
 def send_draft(token, chat_ids, subject, body):
