@@ -40,14 +40,25 @@ def _household_sentence(p):
         p2_status = p.get("person2_status", "")
 
         age_str = f", beide {age} Jahre alt" if age else ""
-        p1_detail = (f", {p1_status}" if p1_status else "")
+        p1_detail = (f" und ist {p1_status}" if p1_status else "")
         p2_detail = (f" und ist {p2_status}" if p2_status else "")
+
+        flags_sentence = ""
+        if flags:
+            parts = []
+            if p.get("nichtraucher"):
+                parts.append("Nichtraucher")
+            if p.get("keine_haustiere"):
+                parts.append("haben keine Haustiere")
+            if p.get("ruhig"):
+                parts.append("wohnen ruhig und gepflegt")
+            flags_sentence = " Wir sind " + ", ".join(parts) + "."
 
         return (
             f"Zu uns: Wir sind zwei Personen{age_str}, die gemeinsam eine Wohnung suchen. "
             f"{p1_name} hat {p1_occ}{p1_detail}. "
             f"{p2_name} studiert {p2_occ}{p2_detail}."
-            f"{flags_str}"
+            f"{flags_sentence}"
         )
 
     occ = p.get("occupation", "berufstätig")
