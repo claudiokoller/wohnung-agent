@@ -196,6 +196,59 @@ def _reply(chat_id: str, text: str):
     notify.reply(config.TELEGRAM_BOT_TOKEN, chat_id, text)
 
 
+def _answer_callback(callback_id: str, text: str = ""):
+    try:
+        requests.post(
+            f"https://api.telegram.org/bot{config.TELEGRAM_BOT_TOKEN}/answerCallbackQuery",
+            json={"callback_query_id": callback_id, "text": text},
+            timeout=10,
+        )
+    except Exception:
+        pass
+
+
+def handle_callback(chat_id: str, callback_id: str, data: str):
+    """Verarbeitet Inline-Button-Klicks."""
+    if data.startswith("merk_"):
+        lid = data[5:]
+        ok = db.mark_listing(config.DB_PATH, lid, "interesting")
+        if ok:
+            _answer_callback(callback_id, "⭐ Gemerkt!")
+            _reply(chat_id, f"⭐ Als interessant markiert: {lid}")
+        else:
+            _answer_callback(callback_id, "❓ Nicht gefunden")
+
+    elif data.startswith("weg_"):
+        lid = data[4:]
+        ok = db.mark_listing(config.DB_PATH, lid, "done")
+        if ok:
+            _answer_callback(callback_id, "✅ Erledigt!")
+            _reply(chat_id, f"✅ Als erledigt markiert: {lid}")
+        else:
+            _answer_callback(callback_id, "❓ Nicht gefunden")
+
+    elif data.startswith("bewirb_"):
+        lid = data[7:]
+        row = db.get_listing(config.DB_PATH, lid)
+        if not row:
+            _answer_callback(callback_id, "❓ Inserat nicht gefunden")
+            return
+        l = _listing_from_row(row)
+        try:
+            subject, body     = build_letter(l, config)
+            subject_b, body_b = build_blank_letter(l, config)
+            notify.send_draft(config.TELEGRAM_BOT_TOKEN, config.TELEGRAM_CHAT_IDS, subject, body)
+            notify.send_blank(config.TELEGRAM_BOT_TOKEN, config.TELEGRAM_CHAT_IDS, subject_b, body_b)
+            notify.send_gmail_button(config.TELEGRAM_BOT_TOKEN, config.TELEGRAM_CHAT_IDS, subject, body)
+            _answer_callback(callback_id, "📝 Entwurf gesendet!")
+        except Exception as e:
+            _answer_callback(callback_id, "❌ Fehler")
+            _reply(chat_id, f"❌ Fehler beim Entwurf: {e}")
+
+    else:
+        _answer_callback(callback_id)
+
+
 def _listing_from_row(row: dict) -> Listing:
     return Listing(
         id       = row["id"],
@@ -452,6 +505,19 @@ def run():
         updates = _get_updates(offset)
         for update in updates:
             offset = update["update_id"] + 1
+
+            # Inline-Button-Klick
+            callback = update.get("callback_query")
+            if callback:
+                cb_chat_id = str(callback.get("message", {}).get("chat", {}).get("id", ""))
+                if cb_chat_id in _WHITELIST:
+                    print(f"[btn] {cb_chat_id}: {callback.get('data', '')[:60]}")
+                    try:
+                        handle_callback(cb_chat_id, callback["id"], callback.get("data", ""))
+                    except Exception as e:
+                        print(f"Fehler bei Callback: {e}")
+                        _answer_callback(callback["id"])
+                continue
 
             # Normale Nachricht oder bearbeitete Nachricht
             message = update.get("message") or update.get("edited_message")

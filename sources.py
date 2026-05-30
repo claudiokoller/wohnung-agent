@@ -39,7 +39,7 @@ class Listing:
             f"{html.escape(str(self.rooms))} Zi · "
             f"{html.escape(str(self.space))} m²\n"
             f"🔗 {self.url}\n"
-            f"<i>via {self.source}</i>"
+            f"<i>via {self.source} · ID: {html.escape(self.id)}</i>"
         )
 
 

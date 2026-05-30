@@ -8,8 +8,7 @@ TELEGRAM_BOT_TOKEN = os.getenv("WOHNUNGS_BOT_TOKEN", "DEIN_BOT_TOKEN")
 # Alternative: gemeinsame Gruppe erstellen, Bot reinholen, dann nur die
 # Gruppen-Chat-ID (negativ, z.B. -100123...) hier reintun.
 TELEGRAM_CHAT_IDS = [
-    "775486897",          # du
-    "KOLLEGE_CHAT_ID",    # Kollege -> via @userinfobot rausfinden
+    "-1001234567890",        # Gruppe "Bot Wohnungssuche ZH"
 ]
 
 # --- Suchkriterien ---

@@ -1,4 +1,5 @@
 import html
+import urllib.parse
 
 import requests
 
@@ -14,18 +15,21 @@ def _truncate(text: str, limit: int = _TELEGRAM_LIMIT) -> str:
     return text[:cutoff] + "\n\n<i>[Text gekürzt]</i>"
 
 
-def _post(token, chat_id, text):
+def _post(token, chat_id, text, reply_markup=None):
     if not chat_id or chat_id.startswith(("DEIN_", "KOLLEGE_")):
         return  # Platzhalter noch nicht ersetzt -> überspringen
+    payload = {
+        "chat_id": chat_id,
+        "text": _truncate(text),
+        "parse_mode": "HTML",
+        "disable_web_page_preview": True,
+    }
+    if reply_markup:
+        payload["reply_markup"] = reply_markup
     try:
         resp = requests.post(
             f"https://api.telegram.org/bot{token}/sendMessage",
-            json={
-                "chat_id": chat_id,
-                "text": _truncate(text),
-                "parse_mode": "HTML",
-                "disable_web_page_preview": True,
-            },
+            json=payload,
             timeout=15,
         )
         if resp.status_code != 200:
@@ -36,8 +40,18 @@ def _post(token, chat_id, text):
 
 def send(token, chat_ids, listing):
     text = listing.telegram_text()
+    lid = listing.id
+    keyboard = {"inline_keyboard": [
+        [
+            {"text": "⭐ Merken",   "callback_data": f"merk_{lid}"},
+            {"text": "✅ Erledigt", "callback_data": f"weg_{lid}"},
+        ],
+        [
+            {"text": "📝 Entwurf", "callback_data": f"bewirb_{lid}"},
+        ],
+    ]}
     for chat_id in chat_ids:
-        _post(token, chat_id, text)
+        _post(token, chat_id, text, reply_markup=keyboard)
 
 
 def send_system(token: str, chat_ids: list, text: str):
@@ -60,6 +74,15 @@ def send_blank(token, chat_ids, subject, body):
     )
     for chat_id in chat_ids:
         _post(token, chat_id, msg)
+
+
+def send_gmail_button(token: str, chat_ids: list, subject: str, body: str):
+    """Sendet einen Button der Gmail-Compose mit vorausgefülltem Betreff+Text öffnet."""
+    params = urllib.parse.urlencode({"view": "cm", "su": subject, "body": body})
+    url = f"https://mail.google.com/mail/?{params}"
+    keyboard = {"inline_keyboard": [[{"text": "✉️ In Gmail öffnen", "url": url}]]}
+    for chat_id in chat_ids:
+        _post(token, chat_id, "✉️ <b>Entwurf in Gmail öffnen</b> — Empfänger aus dem Portal-Kontaktformular ergänzen:", reply_markup=keyboard)
 
 
 def send_draft(token, chat_ids, subject, body):
