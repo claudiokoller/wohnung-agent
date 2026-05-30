@@ -26,7 +26,6 @@ Befehle (nur aus whitelisted Chat-IDs in config.TELEGRAM_CHAT_IDS):
   Inserate (per ID wie «flatfox-998877» oder PLZ wie «8001»):
     /info <id|plz>       Inserat erneut anzeigen
     /bewirb <id|plz>     Bewerbungs-Entwurf erneut posten
-    /merk <id|plz>       Als interessant markieren
     /weg <id|plz>        Als erledigt/uninteressant markieren
 
   Info:
@@ -180,7 +179,6 @@ def _help_text() -> str:
         "/liste — alle interessanten Inserate\n"
         "/info &lt;id|plz&gt; — Inserat anzeigen\n"
         "/bewirb &lt;id|plz&gt; — Bewerbungs-Entwurf posten\n"
-        "/merk &lt;id|plz&gt; — als interessant markieren\n"
         "/weg &lt;id|plz&gt; — als erledigt markieren\n\n"
         "<b>Info:</b>\n"
         "/portale — integrierte Quellen anzeigen\n\n"
@@ -414,17 +412,6 @@ def handle_command(chat_id: str, text: str):
             _reply(chat_id, "✅ Beide Entwürfe erneut gesendet.")
         except Exception as e:
             _reply(chat_id, f"❌ Fehler beim Erstellen des Entwurfs: {e}")
-
-    # --- /merk ---
-    elif cmd == "merk":
-        if not args:
-            _reply(chat_id, "⚠️ Verwendung: /merk <id|plz>")
-            return
-        ok = db.mark_listing(config.DB_PATH, args, "interesting")
-        if ok:
-            _reply(chat_id, f"⭐ Als interessant markiert: {args}")
-        else:
-            _reply(chat_id, f"❓ Kein Inserat gefunden für «{args}».")
 
     # --- /weg ---
     elif cmd == "weg":
