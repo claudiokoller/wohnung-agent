@@ -110,6 +110,7 @@ _GEMEINDE_PLZ: dict[str, list[str]] = {
     "rüti":                 ["8630"],
     "wetzikon":             ["8620", "8623"],
     "hombrechtikon":        ["8634"],
+    "wald":                 ["8636"],
     # --- Illnau-Effretikon / Freiamt ---
     "illnau-effretikon":    ["8307"],
     # --- Andelfingen ---
