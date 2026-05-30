@@ -231,7 +231,9 @@ def handle_callback(chat_id: str, callback_id: str, data: str):
         try:
             subject, body     = build_letter(l, config)
             subject_b, body_b = build_blank_letter(l, config)
-            notify.send_draft(config.TELEGRAM_BOT_TOKEN, config.TELEGRAM_CHAT_IDS, subject, body)
+            notify.send_draft(config.TELEGRAM_BOT_TOKEN, config.TELEGRAM_CHAT_IDS, subject, body,
+                              phone=config.APPLICANT.get("phone", ""),
+                              email=config.APPLICANT.get("email", ""))
             notify.send_blank(config.TELEGRAM_BOT_TOKEN, config.TELEGRAM_CHAT_IDS, subject_b, body_b)
             notify.send_gmail_button(config.TELEGRAM_BOT_TOKEN, config.TELEGRAM_CHAT_IDS, subject, body)
             _answer_callback(callback_id, "📝 Entwurf gesendet!")

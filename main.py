@@ -52,7 +52,9 @@ def _dispatch_draft(listing):
     if config.DRAFT_IN_TELEGRAM:
         # Option 1: fertige Vorlage
         notify.send_draft(
-            config.TELEGRAM_BOT_TOKEN, config.TELEGRAM_CHAT_IDS, subject, body
+            config.TELEGRAM_BOT_TOKEN, config.TELEGRAM_CHAT_IDS, subject, body,
+            phone=config.APPLICANT.get("phone", ""),
+            email=config.APPLICANT.get("email", ""),
         )
         # Option 2: leere Struktur zum manuellen Ausfüllen
         notify.send_blank(

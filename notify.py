@@ -82,11 +82,20 @@ def send_gmail_button(token: str, chat_ids: list, subject: str, body: str):
         _post(token, chat_id, "Empfänger aus dem Portal-Kontaktformular ergänzen:", reply_markup=keyboard)
 
 
-def send_draft(token, chat_ids, subject, body):
+def send_draft(token, chat_ids, subject, body, phone: str = "", email: str = ""):
     """Bewerbungs-Entwurf als kopierfreundliche Nachricht (Monospace-Block).
     Auf dem Handy lange drücken -> kopieren -> ins Portalformular einfügen."""
+    contact = ""
+    if phone or email:
+        parts = []
+        if phone:
+            parts.append(f"📞 {html.escape(phone)}")
+        if email:
+            parts.append(f"✉️ {html.escape(email)}")
+        contact = "  ·  ".join(parts) + "\n"
     msg = (
-        "📝 <b>Bewerbungs-Entwurf</b>\n"
+        f"📝 <b>Bewerbungs-Entwurf</b>\n"
+        f"{contact}"
         f"<b>Betreff:</b> {html.escape(subject)}\n\n"
         f"<pre>{html.escape(body)}</pre>"
     )
