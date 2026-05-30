@@ -44,9 +44,6 @@ def send(token, chat_ids, listing):
     keyboard = {"inline_keyboard": [
         [
             {"text": "⭐ Merken",   "callback_data": f"merk_{lid}"},
-            {"text": "✅ Erledigt", "callback_data": f"weg_{lid}"},
-        ],
-        [
             {"text": "📝 Entwurf", "callback_data": f"bewirb_{lid}"},
         ],
     ]}
