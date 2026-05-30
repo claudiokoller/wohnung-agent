@@ -24,8 +24,6 @@ Befehle (nur aus whitelisted Chat-IDs in config.TELEGRAM_CHAT_IDS):
     /now                 Sofortiger Pipeline-Durchlauf
 
   Inserate (per ID wie «flatfox-998877» oder PLZ wie «8001»):
-    /info <id|plz>       Inserat erneut anzeigen
-    /bewirb <id|plz>     Bewerbungs-Entwurf erneut posten
     /weg <id|plz>        Als erledigt/uninteressant markieren
 
   Info:
@@ -177,8 +175,6 @@ def _help_text() -> str:
         "/now — sofortiger Durchlauf\n\n"
         "<b>Inserate</b> (ID oder PLZ):\n"
         "/liste — alle interessanten Inserate\n"
-        "/info &lt;id|plz&gt; — Inserat anzeigen\n"
-        "/bewirb &lt;id|plz&gt; — Bewerbungs-Entwurf posten\n"
         "/weg &lt;id|plz&gt; — als erledigt markieren\n\n"
         "<b>Info:</b>\n"
         "/portale — integrierte Quellen anzeigen\n\n"
@@ -379,39 +375,6 @@ def handle_command(chat_id: str, text: str):
             _reply(chat_id, "✅ Durchlauf abgeschlossen.")
         except Exception as e:
             _reply(chat_id, f"❌ Fehler beim Durchlauf: {e}")
-
-    # --- /info ---
-    elif cmd == "info":
-        if not args:
-            _reply(chat_id, "⚠️ Verwendung: /info <id|plz>  z.B. /info flatfox-12345 oder /info 8001")
-            return
-        row = db.get_listing(config.DB_PATH, args)
-        if not row:
-            _reply(chat_id, f"❓ Kein Inserat gefunden für «{args}».")
-            return
-        l = _listing_from_row(row)
-        marked = row.get("marked")
-        marker = " ⭐" if marked == "interesting" else (" ✅" if marked == "done" else "")
-        _reply(chat_id, l.telegram_text() + marker)
-
-    # --- /bewirb ---
-    elif cmd == "bewirb":
-        if not args:
-            _reply(chat_id, "⚠️ Verwendung: /bewirb <id|plz>")
-            return
-        row = db.get_listing(config.DB_PATH, args)
-        if not row:
-            _reply(chat_id, f"❓ Kein Inserat gefunden für «{args}».")
-            return
-        l = _listing_from_row(row)
-        try:
-            subject, body     = build_letter(l, config)
-            subject_b, body_b = build_blank_letter(l, config)
-            notify.send_draft(config.TELEGRAM_BOT_TOKEN, config.TELEGRAM_CHAT_IDS, subject, body)
-            notify.send_blank(config.TELEGRAM_BOT_TOKEN, config.TELEGRAM_CHAT_IDS, subject_b, body_b)
-            _reply(chat_id, "✅ Beide Entwürfe erneut gesendet.")
-        except Exception as e:
-            _reply(chat_id, f"❌ Fehler beim Erstellen des Entwurfs: {e}")
 
     # --- /weg ---
     elif cmd == "weg":
