@@ -55,17 +55,22 @@ DB_PATH = os.getenv("WOHNUNGS_DB", "listings.db")
 # --- Bewerbungs-/Besichtigungsanfrage --------------------------------------
 # Wird bei jedem neuen Treffer als fertiger Entwurf erzeugt.
 APPLICANT = {
-    "names": "Max <Nachname>",        # bei WG/Paar beide Namen
-    "household": "single",                # single | paar | wg | familie
-    "occupation": "Softwareentwickler",
-    "employer_or_status": "festangestellt", # z.B. "festangestellt bei X" / "selbständig"
+    "names": "Max <Nachname> & <Kollege Vorname Nachname>",
+    "household": "wg",
+    "person1_name": "Max",
+    "occupation": "sein Wirtschaftsinformatik-Studium erfolgreich abgeschlossen",
+    "employer_or_status": "nach einem längeren Auslandaufenthalt zurück in der Schweiz",
+    "person2_name": "<Kollege Vorname>",
+    "person2_occupation": "Sportmanagement",
+    "person2_status": "nebenbei teilzeitbeschäftigt",
+    "age": 29,
     "phone": "+41 7x xxx xx xx",
-    "email": "deinmail@example.com",      # eure Kontaktadresse fürs Anschreiben
-    "move_in": "per sofort oder nach Vereinbarung",
+    "email": "deinmail@example.com",
+    "move_in": "ab September 2026",
     "nichtraucher": True,
     "keine_haustiere": True,
     "ruhig": True,
-    "extra_line": "",                     # optionaler Zusatzsatz, frei
+    "extra_line": "",
 }
 
 DRAFT_IN_TELEGRAM   = True   # Entwurf als kopierfertige Telegram-Nachricht

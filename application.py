@@ -20,31 +20,47 @@ from email.message import EmailMessage
 
 
 def _household_sentence(p):
-    occ = p.get("occupation", "berufstätig")
-    status = p.get("employer_or_status", "")
-    base = f"ich bin {occ}" + (f", {status}" if status else "")
+    hh = p.get("household", "single")
     flags = []
     if p.get("nichtraucher", True):
         flags.append("Nichtraucher")
     if p.get("keine_haustiere", True):
         flags.append("keine Haustiere")
     if p.get("ruhig", True):
-        flags.append("ruhig und zuverlässig")
-    tail = (", " + ", ".join(flags)) if flags else ""
+        flags.append("ruhig und gepflegt wohnend")
+    flags_str = (" Wir sind " + ", ".join(flags) + ".") if flags else ""
 
-    hh = p.get("household", "single")
-    if hh == "paar":
-        return (f"Wir sind ein berufstätiges Paar ({base}){tail}. "
-                f"Die Wohnung möchten wir als 2-Personen-Haushalt mieten.")
     if hh == "wg":
-        return (f"Wir sind zwei berufstätige Personen ({base}){tail}, "
-                f"die die Wohnung gemeinsam als 2-Personen-Haushalt "
-                f"mieten möchten – beide mit geregeltem Einkommen und "
-                f"vollständigem Dossier.")
+        age       = p.get("age", "")
+        p1_name   = p.get("person1_name", "")
+        p1_occ    = p.get("occupation", "")
+        p1_status = p.get("employer_or_status", "")
+        p2_name   = p.get("person2_name", "")
+        p2_occ    = p.get("person2_occupation", "")
+        p2_status = p.get("person2_status", "")
+
+        age_str = f", beide {age} Jahre alt" if age else ""
+        p1_detail = (f", {p1_status}" if p1_status else "")
+        p2_detail = (f" und ist {p2_status}" if p2_status else "")
+
+        return (
+            f"Zu uns: Wir sind zwei Personen{age_str}, die gemeinsam eine Wohnung suchen. "
+            f"{p1_name} hat {p1_occ}{p1_detail}. "
+            f"{p2_name} studiert {p2_occ}{p2_detail}."
+            f"{flags_str}"
+        )
+
+    occ = p.get("occupation", "berufstätig")
+    status = p.get("employer_or_status", "")
+    base = f"ich bin {occ}" + (f", {status}" if status else "")
+    solo_flags = (", " + ", ".join(flags)) if flags else ""
+    if hh == "paar":
+        return (f"Wir sind ein berufstätiges Paar ({base}){solo_flags}. "
+                f"Die Wohnung möchten wir als 2-Personen-Haushalt mieten.")
     if hh == "familie":
-        return (f"Wir sind eine Familie ({base}){tail}, "
+        return (f"Wir sind eine Familie ({base}){solo_flags}, "
                 f"mit geregeltem Einkommen und vollständigem Dossier.")
-    return (f"Zu mir: {base}{tail}. "
+    return (f"Zu mir: {base}{solo_flags}. "
             f"Die Wohnung würde ich allein bewohnen.")
 
 
@@ -59,25 +75,30 @@ def build_letter(listing, cfg):
     subject = f"Bewerbung / Besichtigungsanfrage – {listing.title}, {listing.location}"
 
     solo = p.get("household", "single") == "single"
-    poss = "meinen Vorstellungen" if solo else "unseren Vorstellungen"
+    haben   = "habe"    if solo else "haben"
+    wurde   = "würde"   if solo else "würden"
+    sehe    = "sehe"    if solo else "sehen"
+    stelle  = "stelle"  if solo else "stellen"
+    mich    = "mich"    if solo else "uns"
+    poss    = "meinen Vorstellungen" if solo else "unseren Vorstellungen"
 
     extra = p.get("extra_line", "").strip()
     extra_block = f"\n\n{extra}" if extra else ""
 
     body = (
         "Sehr geehrte Damen und Herren\n\n"
-        f"mit grossem Interesse habe ich Ihr Inserat für die "
-        f"{listing.rooms}-Zimmer-Wohnung an der {listing.location} "
+        f"mit grossem Interesse {haben} ich Ihr Inserat für die "
+        f"{listing.rooms}-Zimmer-Wohnung in {listing.location} "
         f"({listing.price}) gesehen. Die Wohnung entspricht genau "
-        f"{poss} und ich würde sie sehr gerne besichtigen.\n\n"
+        f"{poss} und ich {wurde} sie sehr gerne besichtigen.\n\n"
         f"{_household_sentence(p)}\n\n"
-        f"Als gewünschten Bezugstermin sehe ich {move_in} vor. Ein "
+        f"Als gewünschten Bezugstermin {sehe} ich {move_in} vor. Ein "
         f"vollständiges Bewerbungsdossier (Ausweiskopie, aktueller "
-        f"Betreibungsauszug, Einkommens-/Lohnnachweis) stelle ich Ihnen "
+        f"Betreibungsauszug, Einkommens-/Lohnnachweis) {stelle} ich Ihnen "
         f"gerne vorab digital oder bei der Besichtigung zu."
         f"{extra_block}\n\n"
-        f"Über einen Besichtigungstermin würde ich mich sehr freuen. "
-        f"Sie erreichen mich unter {phone} oder {mail}.\n\n"
+        f"Über einen Besichtigungstermin {wurde} ich {mich} sehr freuen. "
+        f"Sie erreichen {mich} unter {phone} oder {mail}.\n\n"
         f"Freundliche Grüsse\n"
         f"{names}"
     )
