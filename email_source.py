@@ -58,7 +58,7 @@ LISTING_PATTERNS = {
 }
 
 PRICE_RE = re.compile(r"CHF\s*[\d'’.,]+")
-ROOMS_RE = re.compile(r"([\d]+(?:[.,]\d)?)\s*(?:Zimmer|Zi\.?|pièces|locali)", re.I)
+ROOMS_RE = re.compile(r"([\d]+(?:[.,]\d)?)\s*(?:Zimmer|Zi\.?|rooms?|bedrooms?|pièces|locali)", re.I)
 SPACE_RE = re.compile(r"([\d'’.,]+)\s*m²")
 LOC_RE = re.compile(r"\b(\d{4})\s+([A-ZÄÖÜ][\wÄÖÜäöüéèà.\- ]{2,30})")
 
