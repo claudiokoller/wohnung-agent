@@ -1,0 +1,30 @@
+name: Deploy to VPS
+
+on:
+  push:
+    branches: [master]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: SSH-Key einrichten
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H ${{ secrets.SSH_HOST }} >> ~/.ssh/known_hosts
+
+      - name: Code auf VPS kopieren
+        run: |
+          scp -i ~/.ssh/deploy_key \
+            *.py requirements.txt \
+            ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:/root/wohnungs-bot/
+
+      - name: Services neu starten
+        run: |
+          ssh -i ~/.ssh/deploy_key ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} \
+            "systemctl restart wohnungs-bot wohnungs-bot-cmd && \
+             systemctl status wohnungs-bot wohnungs-bot-cmd --no-pager"
