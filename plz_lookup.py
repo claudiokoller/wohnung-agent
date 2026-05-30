@@ -265,6 +265,30 @@ for _alias, _target in _ALIASES.items():
             _INDEX[_n] = _target
 
 
+# Reverse-Lookup: PLZ → Gemeindename
+_PLZ_TO_GEMEINDE: dict[str, str] = {}
+for _k, _plz_list in _GEMEINDE_PLZ.items():
+    for _p in _plz_list:
+        if _p not in _PLZ_TO_GEMEINDE:
+            _PLZ_TO_GEMEINDE[_p] = _k.title()
+
+
+def plz_to_gemeinde(plz: str) -> str | None:
+    """Gibt den Gemeindenamen für eine PLZ zurück."""
+    return _PLZ_TO_GEMEINDE.get(plz)
+
+
+def group_by_gemeinde(plz_list: list[str]) -> list[tuple[str, list[str]]]:
+    """Gruppiert eine PLZ-Liste nach Gemeinde.
+    Gibt [(gemeindename, [plz, ...]), ...] sortiert nach Gemeindename zurück.
+    PLZ ohne Treffer werden unter '?' zusammengefasst."""
+    groups: dict[str, list[str]] = {}
+    for plz in plz_list:
+        name = _PLZ_TO_GEMEINDE.get(plz, "?")
+        groups.setdefault(name, []).append(plz)
+    return sorted(groups.items(), key=lambda x: x[0])
+
+
 def find_plz(query: str) -> list[str]:
     """Gibt PLZ-Liste für eine Zürcher Gemeinde zurück, [] wenn nicht gefunden."""
     for norm in (_normalize(query), _normalize_simple(query)):

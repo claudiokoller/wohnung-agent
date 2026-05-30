@@ -45,7 +45,7 @@ import requests
 import config
 import db
 import notify
-from plz_lookup import find_gemeinde_name, find_plz
+from plz_lookup import find_gemeinde_name, find_plz, group_by_gemeinde
 from application import build_blank_letter, build_letter
 from sources import Listing
 
@@ -387,8 +387,14 @@ def handle_command(chat_id: str, text: str):
         action  = result["action"]
 
         if action == "show":
-            msg = f"📍 PLZ-Liste: {', '.join(current)}" if current else "📍 PLZ-Filter ist leer (kein Filter aktiv)."
-            _reply(chat_id, msg)
+            if not current:
+                _reply(chat_id, "📍 PLZ-Filter ist leer (kein Filter aktiv).")
+            else:
+                groups = group_by_gemeinde(current)
+                lines = ["📍 <b>PLZ-Filter</b>"]
+                for name, plz_list in groups:
+                    lines.append(f"• {name} ({', '.join(sorted(plz_list))})")
+                _reply(chat_id, "\n".join(lines))
 
         elif action == "add":
             plz = result["plz"]
