@@ -24,7 +24,7 @@ Befehle (nur aus whitelisted Chat-IDs in config.TELEGRAM_CHAT_IDS):
     /now                 Sofortiger Pipeline-Durchlauf
 
   Inserate (per ID wie «flatfox-998877» oder PLZ wie «8001»):
-    /weg <id>            Als erledigt/uninteressant markieren
+    /delete <id>         Aus der Liste entfernen
 
   Info:
     /portale             Integrierte Quellen anzeigen
@@ -175,10 +175,10 @@ def _help_text() -> str:
         "/now — sofortiger Durchlauf\n\n"
         "<b>Inserate</b> (ID oder PLZ):\n"
         "/liste — alle interessanten Inserate\n"
-        "/weg &lt;id&gt; — als erledigt markieren\n\n"
+        "/delete &lt;id&gt; — aus der Liste entfernen\n\n"
         "<b>Info:</b>\n"
         "/portale — integrierte Quellen anzeigen\n\n"
-        "<i>Beispiele: /info flatfox-12345  /merk 8001  /weg 8400</i>"
+        "<i>Beispiel: /delete homegate-3456789</i>"
     )
 
 
@@ -376,17 +376,14 @@ def handle_command(chat_id: str, text: str):
         except Exception as e:
             _reply(chat_id, f"❌ Fehler beim Durchlauf: {e}")
 
-    # --- /weg ---
-    elif cmd == "weg":
+    # --- /delete ---
+    elif cmd == "delete":
         if not args:
-            _reply(chat_id, "⚠️ Verwendung: /weg <id>  z.B. /weg homegate-3456789")
-            return
-        if re.match(r"^\d{4}$", args):
-            _reply(chat_id, "⚠️ Bitte Inserat-ID angeben (z.B. homegate-3456789), nicht PLZ.")
+            _reply(chat_id, "⚠️ Verwendung: /delete <id>  z.B. /delete homegate-3456789")
             return
         ok = db.mark_listing(config.DB_PATH, args, "done")
         if ok:
-            _reply(chat_id, f"✅ Als erledigt markiert: {args}")
+            _reply(chat_id, f"✅ Entfernt: {args}")
         else:
             _reply(chat_id, f"❓ Kein Inserat gefunden für «{args}».")
 
