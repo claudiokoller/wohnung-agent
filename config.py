@@ -55,12 +55,12 @@ DB_PATH = os.getenv("WOHNUNGS_DB", "listings.db")
 # --- Bewerbungs-/Besichtigungsanfrage --------------------------------------
 # Wird bei jedem neuen Treffer als fertiger Entwurf erzeugt.
 APPLICANT = {
-    "names": "Max <Nachname> & <Kollege Vorname Nachname>",
+    "names": "Max <Nachname> & Sam <Nachname>",
     "household": "wg",
     "person1_name": "Max",
     "occupation": "sein Wirtschaftsinformatik-Studium erfolgreich abgeschlossen",
     "employer_or_status": "nach einem längeren Auslandaufenthalt zurück in der Schweiz",
-    "person2_name": "<Kollege Vorname>",
+    "person2_name": "Sam",
     "person2_occupation": "Sportmanagement",
     "person2_status": "nebenbei teilzeitbeschäftigt",
     "age": 29,
