@@ -116,7 +116,7 @@ def parse_plz(args: str) -> dict | None:
 
     if low.startswith("del "):
         plz = args[4:].strip()
-        if re.match(r"^\d{4}$", plz):
+        if len(plz) >= 3:
             return {"action": "del", "plz": plz}
         return None
 
@@ -415,10 +415,25 @@ def handle_command(chat_id: str, text: str):
 
         elif action == "del":
             plz = result["plz"]
-            current = [p for p in current if p != plz]
-            db.set_filter_state(config.DB_PATH, plz_list=current)
-            msg = f"✅ PLZ {plz} entfernt. Aktuelle Liste: {', '.join(current) or '(leer = kein Filter)'}"
-            _reply(chat_id, msg)
+            if re.match(r"^\d{4}$", plz):
+                # Direkte PLZ
+                current = [p for p in current if p != plz]
+                db.set_filter_state(config.DB_PATH, plz_list=current)
+                _reply(chat_id, f"✅ PLZ {plz} entfernt. Aktuelle Liste: {', '.join(current) or '(leer)'}")
+            else:
+                # Gemeindename → alle zugehörigen PLZ entfernen
+                found = find_plz(plz)
+                name  = find_gemeinde_name(plz) or plz.title()
+                if not found:
+                    _reply(chat_id, f"❓ Gemeinde «{plz}» nicht gefunden. Nur Kanton Zürich unterstützt.")
+                    return
+                removed = [p for p in found if p in current]
+                current = [p for p in current if p not in found]
+                db.set_filter_state(config.DB_PATH, plz_list=current)
+                _reply(chat_id,
+                    f"✅ {name}: {len(removed)} PLZ entfernt ({', '.join(removed) or '—'}).\n"
+                    f"Aktuelle Liste: {', '.join(current) or '(leer = kein Filter)'}"
+                )
 
         elif action == "set":
             new_list = result["plz_list"]
