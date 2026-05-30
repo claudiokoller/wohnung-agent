@@ -33,13 +33,13 @@ class Listing:
 
     def telegram_text(self):
         return (
-            f"🏠 <b>{html.escape(self.title)}</b>\n"
+            f"🏠 <b>{html.escape(self.title)}</b>\n\n"
             f"📍 {html.escape(self.location)}\n"
-            f"💰 {html.escape(str(self.price))} · "
-            f"{html.escape(str(self.rooms))} Zi · "
-            f"{html.escape(str(self.space))} m²\n"
+            f"🚪 {html.escape(str(self.rooms))} Zi  ·  "
+            f"📐 {html.escape(str(self.space))} m²  ·  "
+            f"💰 {html.escape(str(self.price))}\n\n"
             f"🔗 {self.url}\n"
-            f"<i>via {self.source} · ID: {html.escape(self.id)}</i>"
+            f"<i>via {self.source} · {html.escape(self.id)}</i>"
         )
 
 

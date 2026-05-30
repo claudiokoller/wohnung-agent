@@ -14,6 +14,33 @@ def _truncate(text: str, limit: int = _TELEGRAM_LIMIT) -> str:
     return text[:cutoff] + "\n\n<i>[Text gekürzt]</i>"
 
 
+def _post_photo(token, chat_id, photo_url, caption, reply_markup=None):
+    """Sendet ein Foto mit Caption. Fällt auf Text-Nachricht zurück wenn Foto fehlschlägt."""
+    if not chat_id or chat_id.startswith(("DEIN_", "KOLLEGE_")):
+        return
+    payload = {
+        "chat_id": chat_id,
+        "photo": photo_url,
+        "caption": _truncate(caption, 1024),  # Telegram Caption-Limit
+        "parse_mode": "HTML",
+    }
+    if reply_markup:
+        payload["reply_markup"] = reply_markup
+    try:
+        resp = requests.post(
+            f"https://api.telegram.org/bot{token}/sendPhoto",
+            json=payload,
+            timeout=15,
+        )
+        if resp.status_code == 200:
+            return
+        print(f"Telegram photo {chat_id}: {resp.status_code} — Fallback auf Text")
+    except Exception as e:
+        print(f"Telegram-Foto-Fehler an {chat_id}: {e}")
+    # Fallback
+    _post(token, chat_id, caption, reply_markup=reply_markup)
+
+
 def _post(token, chat_id, text, reply_markup=None):
     if not chat_id or chat_id.startswith(("DEIN_", "KOLLEGE_")):
         return  # Platzhalter noch nicht ersetzt -> überspringen
@@ -40,14 +67,15 @@ def _post(token, chat_id, text, reply_markup=None):
 def send(token, chat_ids, listing):
     text = listing.telegram_text()
     lid = listing.id
-    keyboard = {"inline_keyboard": [
-        [
-            {"text": "⭐ Merken",   "callback_data": f"merk_{lid}"},
-            {"text": "📝 Entwurf", "callback_data": f"bewirb_{lid}"},
-        ],
-    ]}
+    keyboard = {"inline_keyboard": [[
+        {"text": "⭐ Merken",   "callback_data": f"merk_{lid}"},
+        {"text": "📝 Entwurf", "callback_data": f"bewirb_{lid}"},
+    ]]}
     for chat_id in chat_ids:
-        _post(token, chat_id, text, reply_markup=keyboard)
+        if listing.image:
+            _post_photo(token, chat_id, listing.image, text, reply_markup=keyboard)
+        else:
+            _post(token, chat_id, text, reply_markup=keyboard)
 
 
 def send_system(token: str, chat_ids: list, text: str):
