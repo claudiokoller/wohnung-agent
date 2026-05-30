@@ -57,7 +57,16 @@ LISTING_PATTERNS = {
     ),
 }
 
-PRICE_RE = re.compile(r"CHF\s*[\d'’.,]+")
+PRICE_RE = re.compile(r"CHF\s*[\d’’.,]+")
+AVAILABLE_RE = re.compile(
+    r"(?:ab sofort"
+    r"|ab\s+\d{1,2}[\.\s]\s*\w+[\s,]+\d{4}"
+    r"|(?:ab|per)\s+\d{1,2}\.\d{1,2}\.\d{2,4}"
+    r"|ab\s+(?:januar|februar|märz|april|mai|juni|juli|august|september|oktober|november|dezember"
+    r"|january|february|march|april|may|june|july|august|september|october|november|december)"
+    r"\s+\d{4})",
+    re.I
+)
 ROOMS_RE = re.compile(r"([\d]+(?:[.,]\d)?)\s*(?:Zimmer|Zi\.?|rooms?|bedrooms?|pièces|locali)", re.I)
 SPACE_RE = re.compile(r"([\d'’.,]+)\s*m²")
 LOC_RE = re.compile(r"\b(\d{4})\s+([A-ZÄÖÜ][\wÄÖÜäöüéèà.\- ]{2,30})")
@@ -203,6 +212,7 @@ def _parse_html(html, resolve_links):
 
         rooms = ROOMS_RE.search(block)
         space = SPACE_RE.search(block)
+        avail = AVAILABLE_RE.search(block)
 
         listing_id = f"{portal}-{lid}" if lid else \
             _fingerprint(portal, title, block)
@@ -219,6 +229,7 @@ def _parse_html(html, resolve_links):
             space=space.group(1) if space else "?",
             location=_location(block),
             url=final_url,
+            available=avail.group(0).strip() if avail else None,
         ))
     return listings
 

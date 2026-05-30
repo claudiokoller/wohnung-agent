@@ -21,6 +21,7 @@ Befehle (nur aus whitelisted Chat-IDs in config.TELEGRAM_CHAT_IDS):
     /pause               Versand pausieren
     /resume              Versand fortsetzen
     /status              Aktuelle Filter-Einstellungen
+    /stats               Statistiken (gesehen/gemerkt/letzter Lauf)
     /now                 Sofortiger Pipeline-Durchlauf
 
   Inserate (per ID wie «flatfox-998877» oder PLZ wie «8001»):
@@ -33,8 +34,11 @@ Befehle (nur aus whitelisted Chat-IDs in config.TELEGRAM_CHAT_IDS):
     /help                Diese Liste
 """
 
+import datetime as dt
+import html
 import re
 import time
+from zoneinfo import ZoneInfo
 
 import requests
 
@@ -49,6 +53,10 @@ _POLL_TIMEOUT = 30
 
 # Whitelist einmalig bauen statt bei jedem Update neu
 _WHITELIST: set[str] = {str(cid) for cid in config.TELEGRAM_CHAT_IDS}
+
+# Tagesübersicht: einmal täglich um 20:00 Zürich-Zeit
+_SUMMARY_HOUR = 20
+_last_summary_date: dt.date | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -131,6 +139,52 @@ def parse_exclude(args: str) -> dict | None:
 # Antwort-Texte
 # ---------------------------------------------------------------------------
 
+def _maybe_send_daily_summary():
+    global _last_summary_date
+    now = dt.datetime.now(ZoneInfo("Europe/Zurich"))
+    if now.hour != _SUMMARY_HOUR:
+        return
+    today = now.date()
+    if _last_summary_date == today:
+        return
+    _last_summary_date = today
+    rows = db.get_interesting_today(config.DB_PATH)
+    notify.send_daily_summary(config.TELEGRAM_BOT_TOKEN, config.TELEGRAM_CHAT_IDS, rows)
+    print(f"Tagesübersicht gesendet: {len(rows)} Inserate.")
+
+
+def _stats_text() -> str:
+    from datetime import datetime, timezone
+    stats = db.count_stats(config.DB_PATH)
+    state = db.get_filter_state(config.DB_PATH)
+
+    last_str = stats.get("last_activity")
+    if last_str:
+        try:
+            last_dt = datetime.fromisoformat(last_str).replace(tzinfo=timezone.utc)
+            mins = int((datetime.now(timezone.utc) - last_dt).total_seconds() / 60)
+            if mins < 60:
+                last_fmt = f"vor {mins} Min."
+            elif mins < 1440:
+                last_fmt = f"vor {mins // 60}h {mins % 60}min"
+            else:
+                last_fmt = f"vor {mins // 1440}d"
+        except Exception:
+            last_fmt = last_str
+    else:
+        last_fmt = "noch nie"
+
+    pause_str = "⏸ pausiert" if state.get("paused") else "▶️ aktiv"
+    return (
+        f"📊 <b>Bot-Statistik</b>\n\n"
+        f"🔍 Gesehen: {stats['total_seen']}\n"
+        f"⭐ Gemerkt: {stats['interesting']}\n"
+        f"✅ Erledigt: {stats['done']}\n"
+        f"🕐 Letzter Durchlauf: {last_fmt}\n"
+        f"{pause_str}"
+    )
+
+
 def _status_text() -> str:
     state = db.get_filter_state(config.DB_PATH)
     if not state:
@@ -172,6 +226,7 @@ def _help_text() -> str:
         "/exclude — Keywords leeren\n"
         "/pause / /resume — Versand pausieren/fortsetzen\n"
         "/status — aktuelle Einstellungen\n"
+        "/stats — Statistiken\n"
         "/now — sofortiger Durchlauf\n\n"
         "<b>Inserate</b> (ID oder PLZ):\n"
         "/liste — alle interessanten Inserate\n"
@@ -279,10 +334,12 @@ def handle_command(chat_id: str, text: str):
             header += f" — zeige 10 von {total}"
         lines = [header + "\n"]
         for r in shown:
+            title = html.escape(r["title"] or r["id"])
+            url   = r.get("url") or ""
+            link  = f'<a href="{url}">{title}</a>' if url else f"<b>{title}</b>"
             lines.append(
-                f"• <b>{r['id']}</b>\n"
-                f"  📍 {r['location'] or '—'} · 💰 {r['price'] or '?'} · 🚪 {r['rooms'] or '?'} Zi\n"
-                f"  🔗 {r['url']}"
+                f"• {link}\n"
+                f"  📍 {r['location'] or '—'}  ·  💰 {r['price'] or '?'}  ·  🚪 {r['rooms'] or '?'} Zi"
             )
         _reply(chat_id, "\n".join(lines))
 
@@ -293,6 +350,10 @@ def handle_command(chat_id: str, text: str):
     # --- /status ---
     elif cmd == "status":
         _reply(chat_id, _status_text())
+
+    # --- /stats ---
+    elif cmd == "stats":
+        _reply(chat_id, _stats_text())
 
     # --- /preis ---
     elif cmd == "preis":
@@ -454,6 +515,7 @@ def run():
     offset = _drain_pending_updates()
 
     while True:
+        _maybe_send_daily_summary()
         updates = _get_updates(offset)
         for update in updates:
             offset = update["update_id"] + 1

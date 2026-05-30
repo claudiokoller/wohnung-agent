@@ -78,6 +78,26 @@ def send(token, chat_ids, listing):
             _post(token, chat_id, text, reply_markup=keyboard)
 
 
+def send_daily_summary(token: str, chat_ids: list, listings: list):
+    """Tagesübersicht der heute gemerkten Inserate."""
+    if not listings:
+        text = "📅 <b>Tagesübersicht</b>\n\nHeute keine Inserate als interessant gemerkt."
+    else:
+        n = len(listings)
+        lines = [f"📅 <b>Tagesübersicht — {n} Inserat{'e' if n != 1 else ''} gemerkt</b>\n"]
+        for r in listings:
+            title = html.escape(r.get("title") or r["id"])
+            url   = r.get("url") or ""
+            link  = f'<a href="{url}">{title}</a>' if url else f"<b>{title}</b>"
+            lines.append(
+                f"• {link}\n"
+                f"  📍 {r.get('location') or '—'}  ·  💰 {r.get('price') or '?'}  ·  🚪 {r.get('rooms') or '?'} Zi"
+            )
+        text = "\n".join(lines)
+    for chat_id in chat_ids:
+        _post(token, chat_id, text)
+
+
 def send_system(token: str, chat_ids: list, text: str):
     """System-Hinweis (Fehler, Heartbeat) an alle Chat-IDs."""
     for chat_id in chat_ids:

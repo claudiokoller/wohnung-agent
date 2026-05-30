@@ -78,11 +78,16 @@ def init(path):
             )
             """
         )
-        # Migration für bestehende DBs ohne last_activity
-        try:
-            con.execute("ALTER TABLE filter_state ADD COLUMN last_activity TEXT")
-        except Exception:
-            pass  # Spalte existiert bereits
+        # Migrationen für bestehende DBs
+        for col_sql in [
+            "ALTER TABLE filter_state ADD COLUMN last_activity TEXT",
+            "ALTER TABLE listings ADD COLUMN available TEXT",
+            "ALTER TABLE listings ADD COLUMN marked_at TEXT",
+        ]:
+            try:
+                con.execute(col_sql)
+            except Exception:
+                pass  # Spalte existiert bereits
 
 
 # --- Filter-State -----------------------------------------------------------
@@ -144,11 +149,12 @@ def set_filter_state(path, **kwargs):
 
 def upsert_listing(path, listing):
     """Speichert oder aktualisiert ein Inserat (last_seen + Felder)."""
+    available = getattr(listing, "available", None)
     with _conn(path) as con:
         con.execute(
             """
-            INSERT INTO listings (id, source, url, title, price, rooms, space, location)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO listings (id, source, url, title, price, rooms, space, location, available)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 last_seen = CURRENT_TIMESTAMP,
                 title     = excluded.title,
@@ -156,12 +162,13 @@ def upsert_listing(path, listing):
                 rooms     = excluded.rooms,
                 space     = excluded.space,
                 location  = excluded.location,
-                url       = excluded.url
+                url       = excluded.url,
+                available = COALESCE(excluded.available, listings.available)
             """,
             (
                 listing.id, listing.source, listing.url,
                 listing.title, listing.price, listing.rooms,
-                listing.space, listing.location,
+                listing.space, listing.location, available,
             ),
         )
 
@@ -195,11 +202,49 @@ def mark_listing(path, query: str, marked: str | None) -> bool:
     if not listing:
         return False
     with _conn(path) as con:
-        con.execute(
-            "UPDATE listings SET marked = ? WHERE id = ?",
-            (marked, listing["id"]),
-        )
+        if marked == "interesting":
+            con.execute(
+                "UPDATE listings SET marked = ?, marked_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (marked, listing["id"]),
+            )
+        else:
+            con.execute(
+                "UPDATE listings SET marked = ? WHERE id = ?",
+                (marked, listing["id"]),
+            )
     return True
+
+
+def count_stats(path) -> dict:
+    """Gibt Statistiken über gesehene/gemerkete Inserate zurück."""
+    with _conn(path) as con:
+        total = con.execute("SELECT COUNT(*) FROM seen").fetchone()[0]
+        interesting = con.execute(
+            "SELECT COUNT(*) FROM listings WHERE marked = 'interesting'"
+        ).fetchone()[0]
+        done = con.execute(
+            "SELECT COUNT(*) FROM listings WHERE marked = 'done'"
+        ).fetchone()[0]
+        row = con.execute(
+            "SELECT last_activity FROM filter_state WHERE id = 1"
+        ).fetchone()
+    return {
+        "total_seen": total,
+        "interesting": interesting,
+        "done": done,
+        "last_activity": row[0] if row else None,
+    }
+
+
+def get_interesting_today(path) -> list[dict]:
+    """Gibt heute als 'interesting' markierte Inserate zurück."""
+    with _conn(path) as con:
+        rows = con.execute(
+            "SELECT * FROM listings WHERE marked = 'interesting'"
+            " AND date(marked_at) = date('now')"
+            " ORDER BY marked_at DESC"
+        ).fetchall()
+        return [dict(row) for row in rows]
 
 
 # --- Aktivitäts-Tracking (für Heartbeat) ------------------------------------

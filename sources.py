@@ -30,14 +30,17 @@ class Listing:
     location: str
     url: str
     image: str | None = None
+    available: str | None = None
 
     def telegram_text(self):
+        avail = f"\n📅 {html.escape(self.available)}" if self.available else ""
         return (
             f"🏠 <b>{html.escape(self.title)}</b>\n\n"
             f"📍 {html.escape(self.location)}\n"
             f"🚪 {html.escape(str(self.rooms))} Zi  ·  "
             f"📐 {html.escape(str(self.space))} m²  ·  "
-            f"💰 {html.escape(str(self.price))}\n\n"
+            f"💰 {html.escape(str(self.price))}"
+            f"{avail}\n\n"
             f"🔗 {self.url}\n"
             f"<i>via {self.source} · {html.escape(self.id)}</i>"
         )
