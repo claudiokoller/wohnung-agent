@@ -24,7 +24,7 @@ Befehle (nur aus whitelisted Chat-IDs in config.TELEGRAM_CHAT_IDS):
     /now                 Sofortiger Pipeline-Durchlauf
 
   Inserate (per ID wie «flatfox-998877» oder PLZ wie «8001»):
-    /weg <id|plz>        Als erledigt/uninteressant markieren
+    /weg <id>            Als erledigt/uninteressant markieren
 
   Info:
     /portale             Integrierte Quellen anzeigen
@@ -175,7 +175,7 @@ def _help_text() -> str:
         "/now — sofortiger Durchlauf\n\n"
         "<b>Inserate</b> (ID oder PLZ):\n"
         "/liste — alle interessanten Inserate\n"
-        "/weg &lt;id|plz&gt; — als erledigt markieren\n\n"
+        "/weg &lt;id&gt; — als erledigt markieren\n\n"
         "<b>Info:</b>\n"
         "/portale — integrierte Quellen anzeigen\n\n"
         "<i>Beispiele: /info flatfox-12345  /merk 8001  /weg 8400</i>"
@@ -379,7 +379,10 @@ def handle_command(chat_id: str, text: str):
     # --- /weg ---
     elif cmd == "weg":
         if not args:
-            _reply(chat_id, "⚠️ Verwendung: /weg <id|plz>")
+            _reply(chat_id, "⚠️ Verwendung: /weg <id>  z.B. /weg homegate-3456789")
+            return
+        if re.match(r"^\d{4}$", args):
+            _reply(chat_id, "⚠️ Bitte Inserat-ID angeben (z.B. homegate-3456789), nicht PLZ.")
             return
         ok = db.mark_listing(config.DB_PATH, args, "done")
         if ok:
