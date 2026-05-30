@@ -89,19 +89,22 @@ def reply(token: str, chat_id: str, text: str):
     _post(token, chat_id, text)
 
 
-def send_blank(token, chat_ids, subject, body):
+def send_blank(token, chat_ids, subject, body, listing_url: str = ""):
     """Leere Bewerbungsstruktur zum manuellen Ausfüllen."""
     msg = (
         "✏️ <b>Manuell schreiben</b>\n"
         f"<b>Betreff:</b> {html.escape(subject)}\n\n"
         f"<pre>{html.escape(body)}</pre>"
     )
+    keyboard = None
+    if listing_url:
+        keyboard = {"inline_keyboard": [[{"text": "🔗 Zum Kontaktformular", "url": listing_url}]]}
     for chat_id in chat_ids:
-        _post(token, chat_id, msg)
+        _post(token, chat_id, msg, reply_markup=keyboard)
 
 
 
-def send_draft(token, chat_ids, subject, body, phone: str = "", email: str = "", listing_url: str = ""):
+def send_draft(token, chat_ids, subject, body, phone: str = "", email: str = ""):
     """Bewerbungs-Entwurf als kopierfreundliche Nachricht (Monospace-Block).
     Auf dem Handy lange drücken -> kopieren -> ins Portalformular einfügen."""
     contact = ""
@@ -118,8 +121,5 @@ def send_draft(token, chat_ids, subject, body, phone: str = "", email: str = "",
         f"<b>Betreff:</b> {html.escape(subject)}\n\n"
         f"<pre>{html.escape(body)}</pre>"
     )
-    keyboard = None
-    if listing_url:
-        keyboard = {"inline_keyboard": [[{"text": "🔗 Zum Kontaktformular", "url": listing_url}]]}
     for chat_id in chat_ids:
-        _post(token, chat_id, msg, reply_markup=keyboard)
+        _post(token, chat_id, msg)

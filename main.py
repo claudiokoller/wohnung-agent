@@ -55,11 +55,11 @@ def _dispatch_draft(listing):
             config.TELEGRAM_BOT_TOKEN, config.TELEGRAM_CHAT_IDS, subject, body,
             phone=config.APPLICANT.get("phone", ""),
             email=config.APPLICANT.get("email", ""),
-            listing_url=listing.url,
         )
         # Option 2: leere Struktur zum manuellen Ausfüllen
         notify.send_blank(
-            config.TELEGRAM_BOT_TOKEN, config.TELEGRAM_CHAT_IDS, subject_b, body_b
+            config.TELEGRAM_BOT_TOKEN, config.TELEGRAM_CHAT_IDS, subject_b, body_b,
+            listing_url=listing.url,
         )
     if config.DRAFT_SAVE_FILES:
         save_file(listing, subject, body)
