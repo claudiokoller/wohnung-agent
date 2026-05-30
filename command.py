@@ -45,6 +45,7 @@ import requests
 import config
 import db
 import notify
+from plz_lookup import find_gemeinde_name, find_plz
 from application import build_blank_letter, build_letter
 from sources import Listing
 
@@ -109,7 +110,7 @@ def parse_plz(args: str) -> dict | None:
 
     if low.startswith("add "):
         plz = args[4:].strip()
-        if re.match(r"^\d{4}$", plz):
+        if len(plz) >= 3:  # PLZ (4 Ziffern) oder Gemeindename (mind. 3 Zeichen)
             return {"action": "add", "plz": plz}
         return None
 
@@ -391,10 +392,26 @@ def handle_command(chat_id: str, text: str):
 
         elif action == "add":
             plz = result["plz"]
-            if plz not in current:
-                current.append(plz)
-            db.set_filter_state(config.DB_PATH, plz_list=current)
-            _reply(chat_id, f"✅ PLZ {plz} hinzugefügt. Aktuelle Liste: {', '.join(current)}")
+            if re.match(r"^\d{4}$", plz):
+                # Direkte PLZ-Eingabe
+                if plz not in current:
+                    current.append(plz)
+                db.set_filter_state(config.DB_PATH, plz_list=current)
+                _reply(chat_id, f"✅ PLZ {plz} hinzugefügt. Aktuelle Liste: {', '.join(current)}")
+            else:
+                # Gemeindename → PLZ-Lookup
+                found = find_plz(plz)
+                name  = find_gemeinde_name(plz) or plz.title()
+                if not found:
+                    _reply(chat_id, f"❓ Gemeinde «{plz}» nicht gefunden. Nur Kanton Zürich unterstützt.")
+                    return
+                added = [p for p in found if p not in current]
+                current.extend(added)
+                db.set_filter_state(config.DB_PATH, plz_list=current)
+                _reply(chat_id,
+                    f"✅ {name}: {len(added)} PLZ hinzugefügt ({', '.join(found)}).\n"
+                    f"Aktuelle Liste: {', '.join(current)}"
+                )
 
         elif action == "del":
             plz = result["plz"]
