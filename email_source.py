@@ -69,7 +69,7 @@ AVAILABLE_RE = re.compile(
     re.I
 )
 ROOMS_RE = re.compile(r"([\d]+(?:[.,]\d)?)[\s-]*(?:Zimmer|Zi\.?|rooms?|bedrooms?|pièces|locali)", re.I)
-SPACE_RE = re.compile(r"([\d’’.,]+)\s*m[²2]")
+SPACE_RE = re.compile(r"([\d’’.,]+)\s*m\s?[²2]")
 LOC_RE = re.compile(
     r"(?:\b(?P<plz>\d{4})\s+(?P<city>[A-ZÄÖÜ][\wÄÖÜäöüéèà.\-]{1,25})"
     r"|\b(?P<city2>[A-ZÄÖÜ][\wÄÖÜäöüéèà.\-]{1,25})\s*\((?P<plz2>\d{4})\))"
@@ -80,7 +80,11 @@ _CTA_RE = re.compile(
     r"anzeige ansehen|zur wohnung|jetzt ansehen|zum objekt|"
     r"mehr details?|inserat ansehen|view listing|more details?|"
     r"weiter|hier klicken|jetzt anzeigen|alle details|"
-    r"zur immobilie|kontaktieren|kontakt aufnehmen|anzeige|inserat)$",
+    r"zur immobilie|kontaktieren|kontakt aufnehmen|anzeige|inserat|"
+    r"anbieter kontaktieren\s*[›»]?|contact the advertiser|"
+    r"alle treffer anschauen|view all matching listings|"
+    r"suchabo bearbeiten|suchabo löschen|edit search alert|delete search alert|"
+    r"abmelden|unsubscribe)$",
     re.I,
 )
 
@@ -380,8 +384,8 @@ def dump_emails(cfg, out_dir="email_dumps", all_emails=False):
             print(f"Betreff: {subject[:70]}")
             print(f"Gespeichert: {path}")
 
-            # Geparste Listings direkt anzeigen (ohne Redirect-Auflösung)
-            listings = _parse_html(html, resolve_links=False)
+            # Geparste Listings mit Redirect-Auflösung (wie im Live-Betrieb)
+            listings = _parse_html(html, resolve_links=True)
             if not listings:
                 print("  ⚠️  Keine Listings gefunden — Parser-Tuning nötig!")
             for l in listings:
