@@ -48,7 +48,7 @@ LISTING_PATTERNS = {
         r"homegate\.ch/(?:de/|fr/|it/|en/)?(?:mieten|rent|kaufen|buy)/(\d{5,})"
     ),
     "ImmoScout24": re.compile(
-        r"immoscout24\.ch/(?:de/|fr/|it/|en/)?d/[\w/-]*?(\d{6,})"
+        r"immoscout24\.ch/(?:de/|fr/|it/|en/)?(?:d/[\w/-]*?|rent/|mieten/|louer/|affittare/)(\d{5,})"
     ),
     "newhome": re.compile(
         r"newhome\.ch/(?:de/|fr/|it/)?[\w/-]*?(\d{6,})"
@@ -248,10 +248,15 @@ def _candidate_links(soup):
     return out
 
 
+def _data_score(price, rooms, space, location) -> int:
+    """Zählt wie viele Felder sinnvoll gefüllt sind (höher = besser)."""
+    return sum(v not in ("?", "—", "", None) for v in [price, rooms, space, location])
+
+
 def _parse_html(html, resolve_links):
     soup = BeautifulSoup(html, "html.parser")
-    seen_local = set()
-    listings = []
+    seen_idx: dict[str, int] = {}   # listing_id -> Index in `listings`
+    listings: list = []
 
     candidates = _candidate_links(soup)
     if not candidates:
@@ -281,15 +286,11 @@ def _parse_html(html, resolve_links):
             portal, lid, _ = _identify(resolved)
             href_map[href] = (portal, lid, resolved if portal else href)
 
-    # Pass 3: Listings parsen
+    # Pass 3: Listings parsen — bessere Daten überschreiben leere Ersterfassung
     for a in candidates:
         href = a["href"].strip()
         portal, lid, final_url = href_map.get(href, (None, None, href))
         if not portal:
-            continue
-
-        # Early-Skip: wenn lid bekannt, _best_block überspringen wenn bereits verarbeitet
-        if lid and f"{portal}-{lid}" in seen_local:
             continue
 
         link_text = a.get_text(" ", strip=True)
@@ -300,25 +301,39 @@ def _parse_html(html, resolve_links):
         else:
             title = (link_text or heading or block[:80] or "Wohnung")[:120]
 
-        rooms = ROOMS_RE.search(block)
-        space = SPACE_RE.search(block)
-        avail = AVAILABLE_RE.search(block)
+        price    = _first(PRICE_RE, block) or "?"
+        rooms    = ROOMS_RE.search(block)
+        space    = SPACE_RE.search(block)
+        avail    = AVAILABLE_RE.search(block)
+        location = _location(block)
+
+        rooms_val = rooms.group(1) if rooms else "?"
+        space_val = space.group(1) if space else "?"
+        avail_val = avail.group(0).strip() if avail else None
 
         listing_id = f"{portal}-{lid}" if lid else _fingerprint(portal, title, block)
-        if listing_id in seen_local:
-            continue
-        seen_local.add(listing_id)
 
+        if listing_id in seen_idx:
+            # Nur überschreiben wenn aktuelle Daten reichhaltiger sind
+            idx   = seen_idx[listing_id]
+            old   = listings[idx]
+            old_s = _data_score(old.price, old.rooms, old.space, old.location)
+            new_s = _data_score(price, rooms_val, space_val, location)
+            if new_s > old_s:
+                listings[idx] = Listing(
+                    id=listing_id, source=portal,
+                    title=title if title != "Wohnung" else old.title,
+                    price=price, rooms=rooms_val, space=space_val,
+                    location=location, url=final_url,
+                    available=avail_val or old.available,
+                )
+            continue
+
+        seen_idx[listing_id] = len(listings)
         listings.append(Listing(
-            id=listing_id,
-            source=portal,
-            title=title,
-            price=_first(PRICE_RE, block) or "?",
-            rooms=rooms.group(1) if rooms else "?",
-            space=space.group(1) if space else "?",
-            location=_location(block),
-            url=final_url,
-            available=avail.group(0).strip() if avail else None,
+            id=listing_id, source=portal, title=title,
+            price=price, rooms=rooms_val, space=space_val,
+            location=location, url=final_url, available=avail_val,
         ))
     return listings
 
