@@ -82,6 +82,7 @@ def init(path):
         for col_sql in [
             "ALTER TABLE filter_state ADD COLUMN last_activity TEXT",
             "ALTER TABLE filter_state ADD COLUMN kw_list TEXT DEFAULT '[]'",
+            "ALTER TABLE filter_state ADD COLUMN verfuegbar_ab TEXT",
             "ALTER TABLE listings ADD COLUMN available TEXT",
             "ALTER TABLE listings ADD COLUMN marked_at TEXT",
             "ALTER TABLE listings ADD COLUMN price_num REAL",
@@ -293,6 +294,16 @@ def get_interesting_listings(path) -> list[dict]:
         return [dict(row) for row in rows]
 
 
+def get_open_listings(path) -> list[dict]:
+    """Gibt alle Inserate mit offenem Bewerbungs-Status zurück (beworben/besichtigung)."""
+    with _conn(path) as con:
+        rows = con.execute(
+            "SELECT * FROM listings WHERE marked IN ('beworben','besichtigung')"
+            " ORDER BY marked DESC, last_seen DESC"
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+
 def cleanup_done(path) -> dict:
     """Löscht alle als 'done' markierten Inserate aus listings und seen.
     Gibt {'listings': n, 'seen': n} zurück."""
@@ -331,6 +342,35 @@ def count(path):
 
 # --- Filter-Logik -----------------------------------------------------------
 
+_MONTH_MAP = {
+    "januar": 1, "februar": 2, "märz": 3, "april": 4, "mai": 5, "juni": 6,
+    "juli": 7, "august": 8, "september": 9, "oktober": 10, "november": 11,
+    "dezember": 12, "january": 1, "february": 2, "march": 3, "may": 5,
+    "june": 6, "july": 7, "october": 10, "december": 12,
+}
+
+
+def _parse_available_ym(text: str) -> tuple[int, int] | None:
+    """Extrahiert (Jahr, Monat) aus einem available-String. None wenn nicht parsebar."""
+    if not text:
+        return None
+    low = text.lower()
+    if "sofort" in low:
+        return None  # ab sofort = immer ok
+    m = re.search(r"\b(\d{1,2})\.(\d{1,2})\.(20\d{2})\b", text)
+    if m:
+        return int(m.group(3)), int(m.group(2))
+    for name, num in _MONTH_MAP.items():
+        if name in low:
+            m = re.search(r"\b(20\d{2})\b", text)
+            if m:
+                return int(m.group(1)), num
+    m = re.search(r"\b(20\d{2})-(\d{2})\b", text)
+    if m:
+        return int(m.group(1)), int(m.group(2))
+    return None
+
+
 def _parse_price(s) -> float | None:
     """'CHF 1'800' oder '1800' -> 1800.0, '?' -> None."""
     if not s or str(s).strip() in ("?", "—", ""):
@@ -355,13 +395,14 @@ def apply_filter(listings: list, filter_state: dict) -> list:
     if not filter_state:
         return listings
 
-    max_price  = filter_state.get("max_price")
-    min_rooms  = filter_state.get("min_rooms")
-    max_rooms  = filter_state.get("max_rooms")
-    min_space  = filter_state.get("min_space")
-    plz_list   = filter_state.get("plz_list", [])
-    exclude_kw = filter_state.get("exclude_kw", [])
-    kw_list    = filter_state.get("kw_list", [])
+    max_price    = filter_state.get("max_price")
+    min_rooms    = filter_state.get("min_rooms")
+    max_rooms    = filter_state.get("max_rooms")
+    min_space    = filter_state.get("min_space")
+    plz_list     = filter_state.get("plz_list", [])
+    exclude_kw   = filter_state.get("exclude_kw", [])
+    kw_list      = filter_state.get("kw_list", [])
+    verfuegbar_ab = filter_state.get("verfuegbar_ab")  # "YYYY-MM" oder None
 
     out = []
     for l in listings:
@@ -406,6 +447,18 @@ def apply_filter(listings: list, filter_state: dict) -> list:
             haystack = f"{l.title} {l.location}".lower()
             if not any(kw.strip().lower() in haystack for kw in kw_list if kw.strip()):
                 continue
+
+        # --- Verfügbarkeits-Filter ---
+        # Inserate die erst nach dem Zieldatum frei sind, werden übersprungen.
+        # Kein available-Feld oder "ab sofort" -> immer durchlassen.
+        if verfuegbar_ab:
+            try:
+                target_y, target_m = map(int, verfuegbar_ab.split("-"))
+                avail_ym = _parse_available_ym(getattr(l, "available", None) or "")
+                if avail_ym is not None and avail_ym > (target_y, target_m):
+                    continue
+            except Exception:
+                pass
 
         out.append(l)
     return out

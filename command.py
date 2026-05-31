@@ -219,6 +219,7 @@ def _status_text() -> str:
     plz_str   = ", ".join(state.get("plz_list", [])) or "kein Filter"
     excl_str  = ", ".join(state.get("exclude_kw", [])) or "—"
     kw_str    = ", ".join(state.get("kw_list",    [])) or "—"
+    verfstr   = state.get("verfuegbar_ab") or "kein Filter"
     pause_str = "⏸ <b>PAUSIERT</b>" if state.get("paused") else "▶️ aktiv"
 
     return (
@@ -228,7 +229,8 @@ def _status_text() -> str:
         f"📐 Mindestfläche: {space_str}\n"
         f"📍 PLZ: {plz_str}\n"
         f"🚫 Exclude: {excl_str}\n"
-        f"✅ Keywords: {kw_str}"
+        f"✅ Keywords: {kw_str}\n"
+        f"📅 Verfügbar bis: {verfstr}"
     )
 
 
@@ -239,6 +241,8 @@ def _help_text() -> str:
         "/preis 2500 — Maximalpreis CHF\n"
         "/zimmer 2.5-4 — Zimmer-Range\n"
         "/flaeche 60 — Mindestfläche m²\n"
+        "/verfuegbar 2026-09 — nur bis dieses Datum verfügbar\n"
+        "/verfuegbar — Filter leeren\n"
         "/plz 8001,8004 — PLZ-Filter setzen\n"
         "/plz add 8953 — PLZ hinzufügen\n"
         "/plz del 8957 — PLZ entfernen\n"
@@ -252,6 +256,7 @@ def _help_text() -> str:
         "/stats — Statistiken\n"
         "/now — sofortiger Durchlauf\n\n"
         "<b>Inserate</b> (ID oder PLZ):\n"
+        "/offen — offene Bewerbungen + Besichtigungen\n"
         "/liste — interessante Inserate\n"
         "/info &lt;id&gt; — Details + Notiz anzeigen\n"
         "/notiz &lt;id&gt; &lt;text&gt; — Notiz speichern\n"
@@ -365,8 +370,28 @@ def handle_command(chat_id: str, text: str):
     cmd     = cmd_raw.split("@")[0]
     args    = parts[1].strip() if len(parts) > 1 else ""
 
+    # --- /offen ---
+    if cmd == "offen":
+        rows = db.get_open_listings(config.DB_PATH)
+        if not rows:
+            _reply(chat_id, "📭 Keine offenen Bewerbungen oder Besichtigungen.")
+            return
+        icons = {"beworben": "📬", "besichtigung": "🏠"}
+        lines = [f"📋 <b>Offene Bewerbungen ({len(rows)})</b>\n"]
+        for r in rows:
+            title = html.escape(r.get("title") or r["id"])
+            url   = r.get("url") or ""
+            link  = f'<a href="{url}">{title}</a>' if url else f"<b>{title}</b>"
+            icon  = icons.get(r.get("marked", ""), "•")
+            lines.append(
+                f"{icon} {link}\n"
+                f"  📍 {r.get('location') or '—'}  ·  💰 {r.get('price') or '?'}"
+                + (f"\n  📝 {html.escape(r['note'])}" if r.get("note") else "")
+            )
+        _reply(chat_id, "\n".join(lines))
+
     # --- /liste ---
-    if cmd == "liste":
+    elif cmd == "liste":
         rows = db.get_interesting_listings(config.DB_PATH)
         if not rows:
             _reply(chat_id, "⭐ Keine als interessant markierten Inserate.")
@@ -428,6 +453,18 @@ def handle_command(chat_id: str, text: str):
             _reply(chat_id, f"✅ Mindestfläche: {val:.0f} m²")
         except ValueError:
             _reply(chat_id, "⚠️ Ungültig. Beispiel: /flaeche 60")
+
+    # --- /verfuegbar ---
+    elif cmd == "verfuegbar":
+        if not args:
+            db.set_filter_state(config.DB_PATH, verfuegbar_ab=None)
+            _reply(chat_id, "✅ Verfügbarkeits-Filter geleert.")
+            return
+        if not re.match(r"^20\d{2}-(0[1-9]|1[0-2])$", args.strip()):
+            _reply(chat_id, "⚠️ Format: /verfuegbar YYYY-MM  z.B. /verfuegbar 2026-09")
+            return
+        db.set_filter_state(config.DB_PATH, verfuegbar_ab=args.strip())
+        _reply(chat_id, f"✅ Nur Inserate verfügbar bis {args.strip()} werden gezeigt.")
 
     # --- /keyword ---
     elif cmd == "keyword":
