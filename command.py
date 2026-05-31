@@ -198,12 +198,14 @@ def _status_text() -> str:
     max_price = state.get("max_price")
     min_rooms = state.get("min_rooms")
     max_rooms = state.get("max_rooms")
+    min_space = state.get("min_space")
 
     price_str = f"CHF {max_price:,.0f}".replace(",", "'") if max_price else "kein Limit"
     rooms_str = (
         f"{min_rooms}–{max_rooms}" if (min_rooms and max_rooms)
         else str(min_rooms or max_rooms or "—")
     )
+    space_str = f"ab {min_space:.0f} m²" if min_space else "kein Limit"
     plz_str   = ", ".join(state.get("plz_list", [])) or "kein Filter"
     excl_str  = ", ".join(state.get("exclude_kw", [])) or "—"
     pause_str = "⏸ <b>PAUSIERT</b>" if state.get("paused") else "▶️ aktiv"
@@ -212,6 +214,7 @@ def _status_text() -> str:
         f"📊 <b>Filter-Status</b> — {pause_str}\n"
         f"💰 Maximalpreis: {price_str}\n"
         f"🚪 Zimmer: {rooms_str}\n"
+        f"📐 Mindestfläche: {space_str}\n"
         f"📍 PLZ: {plz_str}\n"
         f"🚫 Exclude: {excl_str}"
     )

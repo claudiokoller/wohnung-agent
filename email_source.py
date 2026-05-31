@@ -68,8 +68,8 @@ AVAILABLE_RE = re.compile(
     r"\s+\d{4})",
     re.I
 )
-ROOMS_RE = re.compile(r"([\d]+(?:[.,]\d)?)\s*(?:Zimmer|Zi\.?|rooms?|bedrooms?|pièces|locali)", re.I)
-SPACE_RE = re.compile(r"([\d’’.,]+)\s*m²")
+ROOMS_RE = re.compile(r"([\d]+(?:[.,]\d)?)[\s-]*(?:Zimmer|Zi\.?|rooms?|bedrooms?|pièces|locali)", re.I)
+SPACE_RE = re.compile(r"([\d’’.,]+)\s*m[²2]")
 LOC_RE = re.compile(
     r"(?:\b(?P<plz>\d{4})\s+(?P<city>[A-ZÄÖÜ][\wÄÖÜäöüéèà.\-]{1,25})"
     r"|\b(?P<city2>[A-ZÄÖÜ][\wÄÖÜäöüéèà.\-]{1,25})\s*\((?P<plz2>\d{4})\))"
@@ -189,11 +189,10 @@ def _fingerprint(portal, title, block):
     return f"{portal.lower()}-fp-{h}"
 
 
-def _best_block(a, hard_limit: int = 800) -> tuple[str, str | None]:
+def _best_block(a, max_container: int = 4000) -> tuple[str, str | None]:
     """Steigt in der DOM-Hierarchie auf, bis ein Block mit Preis/Zimmer/Ort
-    gefunden wird. Behebt das Problem wenn der Link in einer isolierten
-    Button-<td> sitzt und der Wohnungskontext eine Ebene höher liegt.
-    Gibt (block_text, heading_oder_None) zurück."""
+    gefunden wird. Gibt (block_text, heading_oder_None) zurück — block_text
+    untrunkiert, damit Regex-Matching auch bei langen Listing-Texten greift."""
     node = a
     best = a.get_text(" ", strip=True)
     heading = None
@@ -205,7 +204,7 @@ def _best_block(a, hard_limit: int = 800) -> tuple[str, str | None]:
         node = p
 
         text = re.sub(r"\s+", " ", " ".join(p.stripped_strings)).strip()
-        if len(text) > hard_limit * 3:
+        if len(text) > max_container:
             break  # zu gross -> mehrere Listings oder ganze Mail drin
 
         best = text
@@ -225,7 +224,7 @@ def _best_block(a, hard_limit: int = 800) -> tuple[str, str | None]:
         if (has_price or has_rooms) and has_loc:
             break
 
-    return best[:hard_limit], heading
+    return best, heading
 
 
 def _candidate_links(soup):
