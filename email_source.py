@@ -335,6 +335,47 @@ def _parse_html(html, resolve_links):
             price=price, rooms=rooms_val, space=space_val,
             location=location, url=final_url, available=avail_val,
         ))
+
+    # Pass 4: Listings mit score=0 aus dem besten nicht-identifizierten Link befüllen.
+    # Nötig wenn Portal-ID aus einem Bild-Link stammt (z.B. newhome) der in einer
+    # eigenen Tabellenzeile sitzt — Daten stehen in einem Schwester-Link.
+    low_quality = [(lid_k, idx_v) for lid_k, idx_v in seen_idx.items()
+                   if _data_score(listings[idx_v].price, listings[idx_v].rooms,
+                                  listings[idx_v].space, listings[idx_v].location) == 0]
+    if low_quality:
+        best_s = 0
+        best_d = None
+        for a in candidates:
+            href = a["href"].strip()
+            if href_map.get(href, (None,))[0] is not None:
+                continue  # wurde in Pass 3 als Listing verarbeitet
+            blk, hdg = _best_block(a)
+            lt = a.get_text(" ", strip=True)
+            if _CTA_RE.match(lt.strip()):
+                t_c = (hdg or blk[:80] or "")[:120]
+            else:
+                t_c = (lt or hdg or blk[:80] or "")[:120]
+            p_c = _first(PRICE_RE, blk) or "?"
+            rm  = ROOMS_RE.search(blk)
+            sp  = SPACE_RE.search(blk)
+            av  = AVAILABLE_RE.search(blk)
+            lc  = _location(blk)
+            rv, sv, avv = (rm.group(1) if rm else "?"), (sp.group(1) if sp else "?"), (av.group(0).strip() if av else None)
+            sc = _data_score(p_c, rv, sv, lc)
+            if sc > best_s:
+                best_s, best_d = sc, (t_c, p_c, rv, sv, lc, avv)
+        if best_d:
+            t_c, p_c, rv, sv, lc, avv = best_d
+            for _, idx_v in low_quality:
+                old = listings[idx_v]
+                listings[idx_v] = Listing(
+                    id=old.id, source=old.source,
+                    title=t_c or old.title,
+                    price=p_c, rooms=rv, space=sv,
+                    location=lc, url=old.url,
+                    available=avv or old.available,
+                )
+
     return listings
 
 
