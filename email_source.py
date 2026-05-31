@@ -68,8 +68,20 @@ AVAILABLE_RE = re.compile(
     re.I
 )
 ROOMS_RE = re.compile(r"([\d]+(?:[.,]\d)?)\s*(?:Zimmer|Zi\.?|rooms?|bedrooms?|pièces|locali)", re.I)
-SPACE_RE = re.compile(r"([\d'’.,]+)\s*m²")
-LOC_RE = re.compile(r"\b(\d{4})\s+([A-ZÄÖÜ][\wÄÖÜäöüéèà.\- ]{2,30})")
+SPACE_RE = re.compile(r"([\d’’.,]+)\s*m²")
+LOC_RE = re.compile(
+    r"(?:\b(?P<plz>\d{4})\s+(?P<city>[A-ZÄÖÜ][\wÄÖÜäöüéèà.\-]{1,25})"
+    r"|\b(?P<city2>[A-ZÄÖÜ][\wÄÖÜäöüéèà.\-]{1,25})\s*\((?P<plz2>\d{4})\))"
+)
+# Generische Button-/Link-Texte in Portal-Mails – kein brauchbarer Titel
+_CTA_RE = re.compile(
+    r"^(zum inserat|zur anzeige|mehr erfahren|details?( anzeigen)?|"
+    r"anzeige ansehen|zur wohnung|jetzt ansehen|zum objekt|"
+    r"mehr details?|inserat ansehen|view listing|more details?|"
+    r"weiter|hier klicken|jetzt anzeigen|alle details|"
+    r"zur immobilie|kontaktieren|kontakt aufnehmen|anzeige|inserat)$",
+    re.I,
+)
 
 _UA = {"User-Agent": "Mozilla/5.0 (compatible; WohnungsBot/1.0)"}
 
@@ -164,12 +176,55 @@ def _first(rx, text):
 
 def _location(text):
     m = LOC_RE.search(text)
-    return f"{m.group(1)} {m.group(2).strip()}" if m else "—"
+    if not m:
+        return "—"
+    plz  = m.group("plz")  or m.group("plz2")
+    city = (m.group("city") or m.group("city2") or "").strip()
+    return f"{plz} {city}"
 
 
 def _fingerprint(portal, title, block):
     h = hashlib.sha1(f"{portal}|{title}|{block}".encode()).hexdigest()[:16]
     return f"{portal.lower()}-fp-{h}"
+
+
+def _best_block(a, hard_limit: int = 800) -> tuple[str, str | None]:
+    """Steigt in der DOM-Hierarchie auf, bis ein Block mit Preis/Zimmer/Ort
+    gefunden wird. Behebt das Problem wenn der Link in einer isolierten
+    Button-<td> sitzt und der Wohnungskontext eine Ebene höher liegt.
+    Gibt (block_text, heading_oder_None) zurück."""
+    node = a
+    best = a.get_text(" ", strip=True)
+    heading = None
+
+    for _ in range(6):
+        p = getattr(node, "parent", None)
+        if p is None or getattr(p, "name", None) in (None, "[document]", "body", "html"):
+            break
+        node = p
+
+        text = re.sub(r"\s+", " ", " ".join(p.stripped_strings)).strip()
+        if len(text) > hard_limit * 3:
+            break  # zu gross -> mehrere Listings oder ganze Mail drin
+
+        best = text
+
+        if not heading:
+            for tag in ("h1", "h2", "h3", "h4", "strong"):
+                h = p.find(tag)
+                if h:
+                    t = h.get_text(" ", strip=True)
+                    if 5 < len(t) < 150:
+                        heading = t
+                        break
+
+        has_price = bool(PRICE_RE.search(text))
+        has_rooms = bool(ROOMS_RE.search(text))
+        has_loc   = bool(LOC_RE.search(text))
+        if (has_price or has_rooms) and has_loc:
+            break
+
+    return best[:hard_limit], heading
 
 
 def _candidate_links(soup):
@@ -204,11 +259,13 @@ def _parse_html(html, resolve_links):
             if not portal:
                 continue
 
-        parent = a.find_parent(["td", "table", "div", "li"]) or a.parent
-        block = " ".join(parent.stripped_strings) if parent else \
-            a.get_text(" ", strip=True)
-        block = re.sub(r"\s+", " ", block)[:600]
-        title = (a.get_text(" ", strip=True) or block[:80] or "Wohnung")[:120]
+        link_text = a.get_text(" ", strip=True)
+        block, heading = _best_block(a)
+        # CTA-Link-Text ("Zum Inserat" etc.) ist kein Titel → Überschrift oder Blockbeginn
+        if _CTA_RE.match(link_text.strip()):
+            title = (heading or block[:80] or "Wohnung")[:120]
+        else:
+            title = (link_text or heading or block[:80] or "Wohnung")[:120]
 
         rooms = ROOMS_RE.search(block)
         space = SPACE_RE.search(block)
@@ -265,8 +322,9 @@ def fetch_email(search, cfg):
 
 
 def dump_emails(cfg, out_dir="email_dumps"):
-    """Debug: rohe HTML-Bodies der Portal-Mails speichern, um die
-    Parser gegen echte Templates zu tunen. Markiert nichts als gelesen."""
+    """Debug: rohe HTML-Bodies der Portal-Mails speichern und geparste
+    Listings direkt ausgeben — ohne Link-Auflösung für Geschwindigkeit.
+    Markiert nichts als gelesen."""
     import os
 
     os.makedirs(out_dir, exist_ok=True)
@@ -278,9 +336,9 @@ def dump_emails(cfg, out_dir="email_dumps"):
             if typ != "OK" or not data or not data[0]:
                 continue
             msg = email.message_from_bytes(data[0][1])
-            sender = _decode(msg.get("From", "unknown"))
+            sender  = _decode(msg.get("From", "unknown"))
             subject = _decode(msg.get("Subject", ""))
-            html = _html_body(msg)
+            html    = _html_body(msg)
             if not html:
                 continue
             safe = re.sub(r"[^\w]+", "_", sender)[:40]
@@ -288,8 +346,30 @@ def dump_emails(cfg, out_dir="email_dumps"):
             with open(path, "w", encoding="utf-8") as f:
                 f.write(html)
             n += 1
-            print(f"  gespeichert: {path}  ({subject[:60]})")
+
+            print(f"\n{'='*60}")
+            print(f"Von:     {sender[:70]}")
+            print(f"Betreff: {subject[:70]}")
+            print(f"Gespeichert: {path}")
+
+            # Geparste Listings direkt anzeigen (ohne Redirect-Auflösung)
+            listings = _parse_html(html, resolve_links=False)
+            if not listings:
+                print("  ⚠️  Keine Listings gefunden — Parser-Tuning nötig!")
+            for l in listings:
+                ok_title = "✓" if l.title and l.title not in ("Wohnung",) else "⚠"
+                ok_price = "✓" if l.price != "?" else "⚠"
+                ok_rooms = "✓" if l.rooms != "?" else "⚠"
+                ok_loc   = "✓" if l.location != "—" else "⚠"
+                print(
+                    f"  [{l.id}]\n"
+                    f"    {ok_title} Titel:   {l.title}\n"
+                    f"    {ok_price} Preis:   {l.price}\n"
+                    f"    {ok_rooms} Zimmer:  {l.rooms}  📐 {l.space}\n"
+                    f"    {ok_loc} Ort:     {l.location}\n"
+                    f"    🔗 {l.url[:80]}"
+                )
         M.close()
     finally:
         M.logout()
-    print(f"{n} Mail(s) nach ./{out_dir}/ gedumpt.")
+    print(f"\n{n} Mail(s) nach ./{out_dir}/ gedumpt.")
