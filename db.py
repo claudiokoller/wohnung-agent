@@ -229,16 +229,21 @@ def count_stats(path) -> dict:
             return con.execute(
                 "SELECT COUNT(*) FROM listings WHERE marked = ?", (marked,)
             ).fetchone()[0]
+        interesting  = _count("interesting")
+        beworben     = _count("beworben")
+        besichtigung = _count("besichtigung")
+        abgelehnt    = _count("abgelehnt")
+        done         = _count("done")
         row = con.execute(
             "SELECT last_activity FROM filter_state WHERE id = 1"
         ).fetchone()
     return {
         "total_seen":   total,
-        "interesting":  _count("interesting"),
-        "beworben":     _count("beworben"),
-        "besichtigung": _count("besichtigung"),
-        "abgelehnt":    _count("abgelehnt"),
-        "done":         _count("done"),
+        "interesting":  interesting,
+        "beworben":     beworben,
+        "besichtigung": besichtigung,
+        "abgelehnt":    abgelehnt,
+        "done":         done,
         "last_activity": row[0] if row else None,
     }
 
