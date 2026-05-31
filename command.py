@@ -235,7 +235,8 @@ def _help_text() -> str:
         "/now — sofortiger Durchlauf\n\n"
         "<b>Inserate</b> (ID oder PLZ):\n"
         "/liste — alle interessanten Inserate\n"
-        "/delete &lt;id&gt; — aus der Liste entfernen\n\n"
+        "/delete &lt;id&gt; — als erledigt markieren\n"
+        "/cleanup — erledigte Inserate aus DB löschen\n\n"
         "<b>Info:</b>\n"
         "/portale — integrierte Quellen anzeigen\n\n"
         "<i>Beispiel: /delete homegate-3456789</i>"
@@ -296,6 +297,12 @@ def handle_callback(chat_id: str, callback_id: str, data: str):
                               email=config.APPLICANT.get("email", ""))
             notify.send_blank(config.TELEGRAM_BOT_TOKEN, config.TELEGRAM_CHAT_IDS, subject_b, body_b,
                               listing_url=l.url)
+            if config.DRAFT_SAVE_FILES:
+                from application import save_file
+                save_file(l, subject, body)
+            if config.DRAFT_IMAP_APPEND:
+                from application import imap_append_draft
+                imap_append_draft(l, subject, body, config)
             _answer_callback(callback_id, "📝 Entwurf gesendet!")
         except Exception as e:
             _answer_callback(callback_id, "❌ Fehler")
@@ -500,6 +507,15 @@ def handle_command(chat_id: str, text: str):
             _reply(chat_id, f"✅ Entfernt: {args}")
         else:
             _reply(chat_id, f"❓ Kein Inserat gefunden für «{args}».")
+
+    # --- /cleanup ---
+    elif cmd == "cleanup":
+        result = db.cleanup_done(config.DB_PATH)
+        n = result["listings"]
+        if n == 0:
+            _reply(chat_id, "🧹 Nichts zu bereinigen — keine erledigten Inserate.")
+        else:
+            _reply(chat_id, f"🧹 {n} erledigte Inserat{'e' if n != 1 else ''} gelöscht.")
 
     # --- /portale ---
     elif cmd == "portale":

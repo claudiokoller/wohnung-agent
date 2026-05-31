@@ -277,6 +277,21 @@ def get_interesting_listings(path) -> list[dict]:
         return [dict(row) for row in rows]
 
 
+def cleanup_done(path) -> dict:
+    """Löscht alle als 'done' markierten Inserate aus listings und seen.
+    Gibt {'listings': n, 'seen': n} zurück."""
+    with _conn(path) as con:
+        done_ids = [r[0] for r in con.execute(
+            "SELECT id FROM listings WHERE marked = 'done'"
+        ).fetchall()]
+        if not done_ids:
+            return {"listings": 0, "seen": 0}
+        placeholders = ",".join("?" * len(done_ids))
+        con.execute(f"DELETE FROM listings WHERE id IN ({placeholders})", done_ids)
+        con.execute(f"DELETE FROM seen    WHERE id IN ({placeholders})", done_ids)
+    return {"listings": len(done_ids), "seen": len(done_ids)}
+
+
 # --- Bestehende Dedup-Funktionen (rückwärtskompatibel) ----------------------
 
 def is_new(path, listing_id):

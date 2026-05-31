@@ -22,6 +22,7 @@ import hashlib
 import imaplib
 import re
 import socket
+from concurrent.futures import ThreadPoolExecutor
 from email.header import decode_header
 
 # IMAP-Verbindung hängt ohne Timeout ewig bei Netzwerkproblemen
@@ -249,15 +250,40 @@ def _parse_html(html, resolve_links):
     seen_local = set()
     listings = []
 
-    for a in _candidate_links(soup):
-        href = a["href"].strip()
-        portal, lid, final_url = _identify(href)
+    candidates = _candidate_links(soup)
+    if not candidates:
+        return listings
 
-        if not portal:  # evtl. Tracking-Wrapper -> auflösen und nochmal
-            resolved = _resolve(href, resolve_links)
-            portal, lid, final_url = _identify(resolved)
-            if not portal:
-                continue
+    # Pass 1: direkt erkennbare URLs identifizieren, Tracking-URLs sammeln
+    href_map: dict[str, tuple] = {}   # href -> (portal, lid, final_url)
+    to_resolve: set[str] = set()
+    for a in candidates:
+        href = a["href"].strip()
+        if href in href_map or href in to_resolve:
+            continue
+        portal, lid, final_url = _identify(href)
+        if portal:
+            href_map[href] = (portal, lid, final_url)
+        elif resolve_links:
+            to_resolve.add(href)
+        else:
+            href_map[href] = (None, None, href)
+
+    # Pass 2: Tracking-Links parallel auflösen (statt sequenziell je ~3s)
+    if to_resolve:
+        hrefs = list(to_resolve)
+        with ThreadPoolExecutor(max_workers=min(8, len(hrefs))) as ex:
+            resolved_urls = list(ex.map(lambda h: _resolve(h, True), hrefs))
+        for href, resolved in zip(hrefs, resolved_urls):
+            portal, lid, _ = _identify(resolved)
+            href_map[href] = (portal, lid, resolved if portal else href)
+
+    # Pass 3: Listings parsen
+    for a in candidates:
+        href = a["href"].strip()
+        portal, lid, final_url = href_map.get(href, (None, None, href))
+        if not portal:
+            continue
 
         # Early-Skip: wenn lid bekannt, _best_block überspringen wenn bereits verarbeitet
         if lid and f"{portal}-{lid}" in seen_local:
@@ -275,8 +301,7 @@ def _parse_html(html, resolve_links):
         space = SPACE_RE.search(block)
         avail = AVAILABLE_RE.search(block)
 
-        listing_id = f"{portal}-{lid}" if lid else \
-            _fingerprint(portal, title, block)
+        listing_id = f"{portal}-{lid}" if lid else _fingerprint(portal, title, block)
         if listing_id in seen_local:
             continue
         seen_local.add(listing_id)
