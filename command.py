@@ -114,12 +114,16 @@ def parse_plz(args: str) -> dict | None:
 
     if low.startswith("add "):
         plz = args[4:].strip()
-        if len(plz) >= 3:  # PLZ (4 Ziffern) oder Gemeindename (mind. 3 Zeichen)
+        if re.match(r"^\d+$", plz):          # reine Zahl → exakt 4 Stellen
+            return {"action": "add", "plz": plz} if re.match(r"^\d{4}$", plz) else None
+        if len(plz) >= 3:                    # Gemeindename
             return {"action": "add", "plz": plz}
         return None
 
     if low.startswith("del "):
         plz = args[4:].strip()
+        if re.match(r"^\d+$", plz):
+            return {"action": "del", "plz": plz} if re.match(r"^\d{4}$", plz) else None
         if len(plz) >= 3:
             return {"action": "del", "plz": plz}
         return None

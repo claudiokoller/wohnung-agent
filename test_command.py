@@ -114,7 +114,8 @@ def test_parse_plz_add_gross():
 
 def test_parse_plz_ungueltige_plz():
     assert parse_plz("add 12345") is None    # 5 Stellen
-    assert parse_plz("add abc") is None
+    assert parse_plz("del 123")   is None    # 3 Stellen
+    # "add abc" ist im Parser gültig (Gemeindenamen-Validierung passiert in handle_command)
 
 def test_parse_plz_gemischte_liste_ungueltig():
     # Wenn ein Eintrag keine gültige PLZ ist -> None

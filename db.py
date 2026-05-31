@@ -234,6 +234,9 @@ def count_stats(path) -> dict:
         besichtigung = _count("besichtigung")
         abgelehnt    = _count("abgelehnt")
         done         = _count("done")
+        new_today = con.execute(
+            "SELECT COUNT(*) FROM listings WHERE date(first_seen) = date('now')"
+        ).fetchone()[0]
         row = con.execute(
             "SELECT last_activity FROM filter_state WHERE id = 1"
         ).fetchone()
@@ -244,6 +247,7 @@ def count_stats(path) -> dict:
         "besichtigung": besichtigung,
         "abgelehnt":    abgelehnt,
         "done":         done,
+        "new_today":    new_today,
         "last_activity": row[0] if row else None,
     }
 
