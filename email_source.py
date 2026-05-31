@@ -134,13 +134,13 @@ def _connect(cfg):
     return M
 
 
-def _alert_uids(M):
+def _alert_uids(M, unseen_only=True):
     uids = []
+    criteria = ["UNSEEN", "FROM"] if unseen_only else ["FROM"]
     for dom in ALERT_SENDER_DOMAINS:
-        typ, data = M.uid("search", None, "UNSEEN", "FROM", dom)
+        typ, data = M.uid("search", None, *criteria, dom)
         if typ == "OK" and data and data[0]:
             uids.extend(data[0].split())
-    # Reihenfolge stabil, Duplikate raus
     return list(dict.fromkeys(uids))
 
 
@@ -349,7 +349,7 @@ def fetch_email(search, cfg):
     return listings
 
 
-def dump_emails(cfg, out_dir="email_dumps"):
+def dump_emails(cfg, out_dir="email_dumps", all_emails=False):
     """Debug: rohe HTML-Bodies der Portal-Mails speichern und geparste
     Listings direkt ausgeben — ohne Link-Auflösung für Geschwindigkeit.
     Markiert nichts als gelesen."""
@@ -359,7 +359,7 @@ def dump_emails(cfg, out_dir="email_dumps"):
     M = _connect(cfg)
     n = 0
     try:
-        for uid in _alert_uids(M):
+        for uid in _alert_uids(M, unseen_only=not all_emails):
             typ, data = M.uid("fetch", uid, "(BODY.PEEK[])")
             if typ != "OK" or not data or not data[0]:
                 continue

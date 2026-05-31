@@ -148,7 +148,9 @@ def run_once(seed=False):
 
 
 if __name__ == "__main__":
-    if "--dump-emails" in sys.argv:
+    if "--dump-emails-all" in sys.argv:
+        dump_emails(config, all_emails=True)
+    elif "--dump-emails" in sys.argv:
         dump_emails(config)
     elif "--seed" in sys.argv:
         run_once(seed=True)
