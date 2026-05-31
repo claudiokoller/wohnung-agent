@@ -37,6 +37,7 @@ Befehle (nur aus whitelisted Chat-IDs in config.TELEGRAM_CHAT_IDS):
 import datetime as dt
 import html
 import re
+import threading
 import time
 from zoneinfo import ZoneInfo
 
@@ -51,6 +52,9 @@ from sources import Listing
 
 # Timeout für Telegram Long-Polling (Sekunden)
 _POLL_TIMEOUT = 30
+
+# Guard für /now: verhindert gleichzeitige Pipeline-Läufe
+_now_running = False
 
 # Whitelist einmalig bauen statt bei jedem Update neu
 _WHITELIST: set[str] = {str(cid) for cid in config.TELEGRAM_CHAT_IDS}
@@ -468,14 +472,23 @@ def handle_command(chat_id: str, text: str):
 
     # --- /now ---
     elif cmd == "now":
+        global _now_running
+        if _now_running:
+            _reply(chat_id, "⏳ Durchlauf läuft bereits, bitte warten…")
+            return
+        _now_running = True
         _reply(chat_id, "🔄 Pipeline läuft…")
-        try:
-            # Import hier um zirkuläre Abhängigkeiten zu vermeiden
-            from main import run_once
-            run_once()
-            _reply(chat_id, "✅ Durchlauf abgeschlossen.")
-        except Exception as e:
-            _reply(chat_id, f"❌ Fehler beim Durchlauf: {e}")
+        def _run_pipeline():
+            global _now_running
+            try:
+                from main import run_once
+                run_once()
+                _reply(chat_id, "✅ Durchlauf abgeschlossen.")
+            except Exception as e:
+                _reply(chat_id, f"❌ Fehler beim Durchlauf: {e}")
+            finally:
+                _now_running = False
+        threading.Thread(target=_run_pipeline, daemon=True).start()
 
     # --- /delete ---
     elif cmd == "delete":

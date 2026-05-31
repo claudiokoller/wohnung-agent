@@ -259,6 +259,10 @@ def _parse_html(html, resolve_links):
             if not portal:
                 continue
 
+        # Early-Skip: wenn lid bekannt, _best_block überspringen wenn bereits verarbeitet
+        if lid and f"{portal}-{lid}" in seen_local:
+            continue
+
         link_text = a.get_text(" ", strip=True)
         block, heading = _best_block(a)
         # CTA-Link-Text ("Zum Inserat" etc.) ist kein Titel → Überschrift oder Blockbeginn
