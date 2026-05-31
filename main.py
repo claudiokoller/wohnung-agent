@@ -29,7 +29,6 @@ from datetime import datetime, timezone
 import config
 import db
 import notify
-from application import build_blank_letter, build_letter, imap_append_draft, save_file
 from email_source import dump_emails, fetch_email
 
 # Jede Quelle: (search, cfg) -> list[Listing]
@@ -40,31 +39,6 @@ _source_failures: dict[str, int] = {}
 _MAX_FAILURES = 3          # ab hier Telegram-Warnung
 _HEARTBEAT_HOURS = 24      # nach X Stunden ohne Aktivität warnen
 _last_heartbeat_sent: datetime | None = None
-
-
-def _dispatch_draft(listing):
-    try:
-        subject, body       = build_letter(listing, config)
-        subject_b, body_b   = build_blank_letter(listing, config)
-    except Exception as e:
-        print(f"Entwurf konnte nicht erstellt werden ({listing.id}): {e}")
-        return
-    if config.DRAFT_IN_TELEGRAM:
-        # Option 1: fertige Vorlage
-        notify.send_draft(
-            config.TELEGRAM_BOT_TOKEN, config.TELEGRAM_CHAT_IDS, subject, body,
-            phone=config.APPLICANT.get("phone", ""),
-            email=config.APPLICANT.get("email", ""),
-        )
-        # Option 2: leere Struktur zum manuellen Ausfüllen
-        notify.send_blank(
-            config.TELEGRAM_BOT_TOKEN, config.TELEGRAM_CHAT_IDS, subject_b, body_b,
-            listing_url=listing.url,
-        )
-    if config.DRAFT_SAVE_FILES:
-        save_file(listing, subject, body)
-    if config.DRAFT_IMAP_APPEND:
-        imap_append_draft(listing, subject, body, config)
 
 
 def _build_search(filter_state: dict) -> dict:
