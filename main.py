@@ -118,6 +118,13 @@ def run_once(seed=False):
             if not db.is_new(config.DB_PATH, l.id):
                 continue
 
+            # Cross-Portal-Dedup: gleiches Inserat von anderem Portal bereits bekannt?
+            dupe_id = db.find_cross_portal_duplicate(config.DB_PATH, l)
+            if dupe_id:
+                print(f"Cross-Portal-Duplikat: {l.id} ≈ {dupe_id} — übersprungen")
+                db.mark_seen(config.DB_PATH, l.id, l.source, l.url)
+                continue
+
             if not seed and not paused:
                 notify.send(config.TELEGRAM_BOT_TOKEN, config.TELEGRAM_CHAT_IDS, l)
                 new_count += 1

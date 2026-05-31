@@ -153,8 +153,11 @@ def _maybe_send_daily_summary():
     if _last_summary_date == today:
         return
     _last_summary_date = today
-    rows = db.get_interesting_today(config.DB_PATH)
-    notify.send_daily_summary(config.TELEGRAM_BOT_TOKEN, config.TELEGRAM_CHAT_IDS, rows)
+    rows  = db.get_interesting_today(config.DB_PATH)
+    stats = db.count_stats(config.DB_PATH)
+    notify.send_daily_summary(
+        config.TELEGRAM_BOT_TOKEN, config.TELEGRAM_CHAT_IDS, stats, rows
+    )
     print(f"Tagesübersicht gesendet: {len(rows)} Inserate.")
 
 
@@ -184,6 +187,9 @@ def _stats_text() -> str:
         f"📊 <b>Bot-Statistik</b>\n\n"
         f"🔍 Gesehen: {stats['total_seen']}\n"
         f"⭐ Gemerkt: {stats['interesting']}\n"
+        f"📬 Beworben: {stats['beworben']}\n"
+        f"🏠 Besichtigung: {stats['besichtigung']}\n"
+        f"❌ Abgelehnt: {stats['abgelehnt']}\n"
         f"✅ Erledigt: {stats['done']}\n"
         f"🕐 Letzter Durchlauf: {last_fmt}\n"
         f"{pause_str}"
@@ -208,6 +214,7 @@ def _status_text() -> str:
     space_str = f"ab {min_space:.0f} m²" if min_space else "kein Limit"
     plz_str   = ", ".join(state.get("plz_list", [])) or "kein Filter"
     excl_str  = ", ".join(state.get("exclude_kw", [])) or "—"
+    kw_str    = ", ".join(state.get("kw_list",    [])) or "—"
     pause_str = "⏸ <b>PAUSIERT</b>" if state.get("paused") else "▶️ aktiv"
 
     return (
@@ -216,7 +223,8 @@ def _status_text() -> str:
         f"🚪 Zimmer: {rooms_str}\n"
         f"📐 Mindestfläche: {space_str}\n"
         f"📍 PLZ: {plz_str}\n"
-        f"🚫 Exclude: {excl_str}"
+        f"🚫 Exclude: {excl_str}\n"
+        f"✅ Keywords: {kw_str}"
     )
 
 
@@ -226,10 +234,13 @@ def _help_text() -> str:
         "<b>Filter:</b>\n"
         "/preis 2500 — Maximalpreis CHF\n"
         "/zimmer 2.5-4 — Zimmer-Range\n"
+        "/flaeche 60 — Mindestfläche m²\n"
         "/plz 8001,8004 — PLZ-Filter setzen\n"
         "/plz add 8953 — PLZ hinzufügen\n"
         "/plz del 8957 — PLZ entfernen\n"
         "/plz — aktuelle PLZ-Liste\n"
+        "/keyword balkon,lift — Whitelist (mind. 1 muss vorkommen)\n"
+        "/keyword — Whitelist leeren\n"
         "/exclude studio,keller — Ausschluss-Keywords\n"
         "/exclude — Keywords leeren\n"
         "/pause / /resume — Versand pausieren/fortsetzen\n"
@@ -237,12 +248,17 @@ def _help_text() -> str:
         "/stats — Statistiken\n"
         "/now — sofortiger Durchlauf\n\n"
         "<b>Inserate</b> (ID oder PLZ):\n"
-        "/liste — alle interessanten Inserate\n"
+        "/liste — interessante Inserate\n"
+        "/info &lt;id&gt; — Details + Notiz anzeigen\n"
+        "/notiz &lt;id&gt; &lt;text&gt; — Notiz speichern\n"
+        "/beworben &lt;id&gt; — als beworben markieren\n"
+        "/besichtigung &lt;id&gt; — Besichtigung vereinbart\n"
+        "/abgelehnt &lt;id&gt; — als abgelehnt markieren\n"
         "/delete &lt;id&gt; — als erledigt markieren\n"
         "/cleanup — erledigte Inserate aus DB löschen\n\n"
         "<b>Info:</b>\n"
         "/portale — integrierte Quellen anzeigen\n\n"
-        "<i>Beispiel: /delete homegate-3456789</i>"
+        "<i>Beispiel: /beworben homegate-3456789</i>"
     )
 
 
@@ -276,11 +292,20 @@ def handle_callback(chat_id: str, callback_id: str, data: str):
         else:
             _answer_callback(callback_id, "❓ Nicht gefunden")
 
+    elif data.startswith("beworben_"):
+        lid = data[9:]
+        ok = db.mark_listing(config.DB_PATH, lid, "beworben")
+        if ok:
+            _answer_callback(callback_id, "📬 Beworben!")
+            _reply(chat_id, f"📬 Als beworben markiert: {lid}")
+        else:
+            _answer_callback(callback_id, "❓ Nicht gefunden")
+
     elif data.startswith("weg_"):
         lid = data[4:]
         ok = db.mark_listing(config.DB_PATH, lid, "done")
         if ok:
-            _answer_callback(callback_id, "✅ Erledigt!")
+            _answer_callback(callback_id, "✅ Weg!")
             _reply(chat_id, f"✅ Als erledigt markiert: {lid}")
         else:
             _answer_callback(callback_id, "❓ Nicht gefunden")
@@ -388,6 +413,27 @@ def handle_command(chat_id: str, text: str):
             return
         db.set_filter_state(config.DB_PATH, **result)
         _reply(chat_id, f"✅ Zimmer-Range: {result['min_rooms']}–{result['max_rooms']}")
+
+    # --- /flaeche ---
+    elif cmd == "flaeche":
+        try:
+            val = float(args.strip())
+            if val <= 0:
+                raise ValueError
+            db.set_filter_state(config.DB_PATH, min_space=val)
+            _reply(chat_id, f"✅ Mindestfläche: {val:.0f} m²")
+        except ValueError:
+            _reply(chat_id, "⚠️ Ungültig. Beispiel: /flaeche 60")
+
+    # --- /keyword ---
+    elif cmd == "keyword":
+        kws = [k.strip() for k in args.split(",") if k.strip()]
+        db.set_filter_state(config.DB_PATH, kw_list=kws)
+        if kws:
+            _reply(chat_id, f"✅ Keyword-Whitelist: {', '.join(kws)}\n"
+                            f"<i>Nur Inserate mit mind. einem dieser Begriffe werden gesendet.</i>")
+        else:
+            _reply(chat_id, "✅ Keyword-Whitelist geleert (kein Filter).")
 
     # --- /plz ---
     elif cmd == "plz":
@@ -499,6 +545,63 @@ def handle_command(chat_id: str, text: str):
             finally:
                 _now_running = False
         threading.Thread(target=_run_pipeline, daemon=True).start()
+
+    # --- /beworben / /besichtigung / /abgelehnt ---
+    elif cmd in ("beworben", "besichtigung", "abgelehnt"):
+        if not args:
+            _reply(chat_id, f"⚠️ Verwendung: /{cmd} <id>  z.B. /{cmd} homegate-3456789")
+            return
+        icons = {"beworben": "📬", "besichtigung": "🏠", "abgelehnt": "❌"}
+        labels = {"beworben": "als beworben", "besichtigung": "Besichtigung vereinbart",
+                  "abgelehnt": "als abgelehnt"}
+        ok = db.mark_listing(config.DB_PATH, args, cmd)
+        if ok:
+            _reply(chat_id, f"{icons[cmd]} {labels[cmd].capitalize()}: {args}")
+        else:
+            _reply(chat_id, f"❓ Kein Inserat gefunden für «{args}».")
+
+    # --- /info ---
+    elif cmd == "info":
+        if not args:
+            _reply(chat_id, "⚠️ Verwendung: /info <id>  z.B. /info homegate-3456789")
+            return
+        row = db.get_listing(config.DB_PATH, args)
+        if not row:
+            _reply(chat_id, f"❓ Kein Inserat gefunden für «{args}».")
+            return
+        status_icons = {
+            "interesting": "⭐", "beworben": "📬", "besichtigung": "🏠",
+            "abgelehnt": "❌", "done": "✅",
+        }
+        marked = row.get("marked")
+        status_str = f"{status_icons.get(marked, '•')} {marked}" if marked else "—"
+        note_str   = f"\n📝 <b>Notiz:</b> {html.escape(row['note'])}" if row.get("note") else ""
+        url = row.get("url") or ""
+        _reply(chat_id,
+            f"🏠 <b>{html.escape(row.get('title') or row['id'])}</b>\n\n"
+            f"📍 {row.get('location') or '—'}\n"
+            f"🚪 {row.get('rooms') or '?'} Zi  ·  "
+            f"📐 {row.get('space') or '?'} m²  ·  "
+            f"💰 {row.get('price') or '?'}\n"
+            f"📅 {row.get('available') or '—'}\n"
+            f"🔖 Status: {status_str}"
+            f"{note_str}\n\n"
+            f"🔗 {url}\n"
+            f"<i>{row['id']}</i>"
+        )
+
+    # --- /notiz ---
+    elif cmd == "notiz":
+        parts = args.split(None, 1)
+        if len(parts) < 2:
+            _reply(chat_id, "⚠️ Verwendung: /notiz <id> <text>")
+            return
+        lid, note_text = parts[0], parts[1]
+        ok = db.set_note(config.DB_PATH, lid, note_text)
+        if ok:
+            _reply(chat_id, f"📝 Notiz gespeichert für {lid}.")
+        else:
+            _reply(chat_id, f"❓ Kein Inserat gefunden für «{lid}».")
 
     # --- /delete ---
     elif cmd == "delete":

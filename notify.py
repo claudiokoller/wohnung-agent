@@ -67,10 +67,16 @@ def _post(token, chat_id, text, reply_markup=None):
 def send(token, chat_ids, listing):
     text = listing.telegram_text()
     lid = listing.id
-    keyboard = {"inline_keyboard": [[
-        {"text": "⭐ Merken",   "callback_data": f"merk_{lid}"},
-        {"text": "📝 Entwurf", "callback_data": f"bewirb_{lid}"},
-    ]]}
+    keyboard = {"inline_keyboard": [
+        [
+            {"text": "⭐ Merken",    "callback_data": f"merk_{lid}"},
+            {"text": "📝 Entwurf",  "callback_data": f"bewirb_{lid}"},
+        ],
+        [
+            {"text": "📬 Beworben", "callback_data": f"beworben_{lid}"},
+            {"text": "❌ Weg",      "callback_data": f"weg_{lid}"},
+        ],
+    ]}
     for chat_id in chat_ids:
         if listing.image:
             _post_photo(token, chat_id, listing.image, text, reply_markup=keyboard)
@@ -78,13 +84,26 @@ def send(token, chat_ids, listing):
             _post(token, chat_id, text, reply_markup=keyboard)
 
 
-def send_daily_summary(token: str, chat_ids: list, listings: list):
-    """Tagesübersicht der heute gemerkten Inserate."""
-    if not listings:
-        text = "📅 <b>Tagesübersicht</b>\n\nHeute keine Inserate als interessant gemerkt."
-    else:
+def send_daily_summary(token: str, chat_ids: list, stats: dict, listings: list):
+    """Tagesübersicht: gemerkete Inserate + offene Bewerbungen + Statistik."""
+    lines = ["📅 <b>Tagesübersicht</b>\n"]
+
+    # Neue Inserate heute
+    new_today = stats.get("new_today", 0)
+    lines.append(f"🔍 Heute neu: {new_today} Inserat{'e' if new_today != 1 else ''}")
+
+    # Offene Bewerbungen
+    beworben     = stats.get("beworben", 0)
+    besichtigung = stats.get("besichtigung", 0)
+    if beworben or besichtigung:
+        lines.append(
+            f"📬 Beworben: {beworben}  ·  🏠 Besichtigung: {besichtigung}"
+        )
+
+    # Heute gemerkete Inserate
+    if listings:
         n = len(listings)
-        lines = [f"📅 <b>Tagesübersicht — {n} Inserat{'e' if n != 1 else ''} gemerkt</b>\n"]
+        lines.append(f"\n⭐ <b>Heute gemerkt ({n})</b>")
         for r in listings:
             title = html.escape(r.get("title") or r["id"])
             url   = r.get("url") or ""
@@ -93,7 +112,10 @@ def send_daily_summary(token: str, chat_ids: list, listings: list):
                 f"• {link}\n"
                 f"  📍 {r.get('location') or '—'}  ·  💰 {r.get('price') or '?'}  ·  🚪 {r.get('rooms') or '?'} Zi"
             )
-        text = "\n".join(lines)
+    else:
+        lines.append("\nHeute keine Inserate gemerkt.")
+
+    text = "\n".join(lines)
     for chat_id in chat_ids:
         _post(token, chat_id, text)
 

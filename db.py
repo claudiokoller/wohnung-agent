@@ -81,8 +81,11 @@ def init(path):
         # Migrationen für bestehende DBs
         for col_sql in [
             "ALTER TABLE filter_state ADD COLUMN last_activity TEXT",
+            "ALTER TABLE filter_state ADD COLUMN kw_list TEXT DEFAULT '[]'",
             "ALTER TABLE listings ADD COLUMN available TEXT",
             "ALTER TABLE listings ADD COLUMN marked_at TEXT",
+            "ALTER TABLE listings ADD COLUMN price_num REAL",
+            "ALTER TABLE listings ADD COLUMN note TEXT",
         ]:
             try:
                 con.execute(col_sql)
@@ -101,8 +104,8 @@ def init_filter_state(path, config_search: dict):
             con.execute(
                 """
                 INSERT INTO filter_state
-                    (id, max_price, min_rooms, max_rooms, min_space, plz_list, exclude_kw, paused)
-                VALUES (1, ?, ?, ?, ?, '[]', '[]', 0)
+                    (id, max_price, min_rooms, max_rooms, min_space, plz_list, exclude_kw, kw_list, paused)
+                VALUES (1, ?, ?, ?, ?, '[]', '[]', '[]', 0)
                 """,
                 (
                     config_search.get("max_price"),
@@ -123,6 +126,7 @@ def get_filter_state(path) -> dict:
         d = dict(row)
         d["plz_list"]   = json.loads(d.get("plz_list")   or "[]")
         d["exclude_kw"] = json.loads(d.get("exclude_kw") or "[]")
+        d["kw_list"]    = json.loads(d.get("kw_list")    or "[]")
         d["paused"]     = bool(d.get("paused", 0))
         return d
 
@@ -149,16 +153,18 @@ def set_filter_state(path, **kwargs):
 
 def upsert_listing(path, listing):
     """Speichert oder aktualisiert ein Inserat (last_seen + Felder)."""
-    available = getattr(listing, "available", None)
+    available  = getattr(listing, "available", None)
+    price_num  = _parse_price(listing.price)
     with _conn(path) as con:
         con.execute(
             """
-            INSERT INTO listings (id, source, url, title, price, rooms, space, location, available)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO listings (id, source, url, title, price, price_num, rooms, space, location, available)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 last_seen = CURRENT_TIMESTAMP,
                 title     = excluded.title,
                 price     = excluded.price,
+                price_num = excluded.price_num,
                 rooms     = excluded.rooms,
                 space     = excluded.space,
                 location  = excluded.location,
@@ -167,7 +173,7 @@ def upsert_listing(path, listing):
             """,
             (
                 listing.id, listing.source, listing.url,
-                listing.title, listing.price, listing.rooms,
+                listing.title, listing.price, price_num, listing.rooms,
                 listing.space, listing.location, available,
             ),
         )
@@ -219,19 +225,20 @@ def count_stats(path) -> dict:
     """Gibt Statistiken über gesehene/gemerkete Inserate zurück."""
     with _conn(path) as con:
         total = con.execute("SELECT COUNT(*) FROM seen").fetchone()[0]
-        interesting = con.execute(
-            "SELECT COUNT(*) FROM listings WHERE marked = 'interesting'"
-        ).fetchone()[0]
-        done = con.execute(
-            "SELECT COUNT(*) FROM listings WHERE marked = 'done'"
-        ).fetchone()[0]
+        def _count(marked):
+            return con.execute(
+                "SELECT COUNT(*) FROM listings WHERE marked = ?", (marked,)
+            ).fetchone()[0]
         row = con.execute(
             "SELECT last_activity FROM filter_state WHERE id = 1"
         ).fetchone()
     return {
-        "total_seen": total,
-        "interesting": interesting,
-        "done": done,
+        "total_seen":   total,
+        "interesting":  _count("interesting"),
+        "beworben":     _count("beworben"),
+        "besichtigung": _count("besichtigung"),
+        "abgelehnt":    _count("abgelehnt"),
+        "done":         _count("done"),
         "last_activity": row[0] if row else None,
     }
 
@@ -345,6 +352,7 @@ def apply_filter(listings: list, filter_state: dict) -> list:
     min_space  = filter_state.get("min_space")
     plz_list   = filter_state.get("plz_list", [])
     exclude_kw = filter_state.get("exclude_kw", [])
+    kw_list    = filter_state.get("kw_list", [])
 
     out = []
     for l in listings:
@@ -383,5 +391,44 @@ def apply_filter(listings: list, filter_state: dict) -> list:
             if any(kw.strip().lower() in haystack for kw in exclude_kw if kw.strip()):
                 continue
 
+        # --- Keyword-Whitelist ---
+        # Mindestens ein Keyword muss vorkommen; leer = kein Filter.
+        if kw_list:
+            haystack = f"{l.title} {l.location}".lower()
+            if not any(kw.strip().lower() in haystack for kw in kw_list if kw.strip()):
+                continue
+
         out.append(l)
     return out
+
+
+def find_cross_portal_duplicate(path, listing) -> str | None:
+    """Sucht ein Inserat mit gleicher PLZ + Preis (±2%) von anderem Portal.
+    Gibt die ID des Duplikats zurück oder None."""
+    plz_m = re.match(r"^(\d{4})", (listing.location or "").strip())
+    price_num = _parse_price(listing.price)
+    if not plz_m or price_num is None:
+        return None
+    plz       = plz_m.group(1)
+    tolerance = max(price_num * 0.02, 20)
+    with _conn(path) as con:
+        row = con.execute(
+            """SELECT id FROM listings
+               WHERE location LIKE ?
+               AND price_num BETWEEN ? AND ?
+               AND source != ?
+               AND id != ?
+               ORDER BY last_seen DESC LIMIT 1""",
+            (f"{plz}%", price_num - tolerance, price_num + tolerance,
+             listing.source, listing.id),
+        ).fetchone()
+    return row[0] if row else None
+
+
+def set_note(path, listing_id: str, note: str) -> bool:
+    """Speichert eine Freitext-Notiz zu einem Inserat. Gibt True zurück wenn gefunden."""
+    with _conn(path) as con:
+        cur = con.execute(
+            "UPDATE listings SET note = ? WHERE id = ?", (note.strip() or None, listing_id)
+        )
+    return cur.rowcount > 0

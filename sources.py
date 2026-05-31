@@ -10,7 +10,9 @@ Such-API hat und scraping-toleranter ist als Homegate/ImmoScout24
 geaendert haben: kurz die Response loggen und Mapping unten anpassen.
 """
 import html
+import re
 from dataclasses import dataclass
+from urllib.parse import quote
 
 import requests
 
@@ -34,13 +36,34 @@ class Listing:
 
     def telegram_text(self):
         avail = f"\n📅 {html.escape(self.available)}" if self.available else ""
+
+        # Preis pro m² (wenn beide Felder numerisch parsebar)
+        price_per_m2 = ""
+        try:
+            p_num = float(re.sub(r"[^\d]", "", str(self.price)))
+            s_num = float(re.sub(r"[^\d.,]", "", str(self.space)).replace(",", "."))
+            if p_num > 100 and s_num > 10:
+                price_per_m2 = f"  ·  📊 {p_num / s_num:.0f}/m²"
+        except Exception:
+            pass
+
+        # Google Maps Link
+        maps_url = ""
+        if self.location and self.location != "—":
+            maps_url = (
+                f'\n🗺 <a href="https://maps.google.com/?q='
+                f'{quote(self.location + " Schweiz")}">Karte</a>'
+            )
+
         return (
             f"🏠 <b>{html.escape(self.title)}</b>\n\n"
             f"📍 {html.escape(self.location)}\n"
             f"🚪 {html.escape(str(self.rooms))} Zi  ·  "
             f"📐 {html.escape(str(self.space))} m²  ·  "
             f"💰 {html.escape(str(self.price))}"
-            f"{avail}\n\n"
+            f"{price_per_m2}"
+            f"{avail}"
+            f"{maps_url}\n\n"
             f"🔗 {self.url}\n"
             f"<i>via {self.source} · {html.escape(self.id)}</i>"
         )
