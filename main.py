@@ -146,7 +146,6 @@ def run_once(seed=False):
 
             if not seed and not paused:
                 notify.send(config.TELEGRAM_BOT_TOKEN, config.TELEGRAM_CHAT_IDS, l)
-                _dispatch_draft(l)
                 new_count += 1
 
             db.mark_seen(config.DB_PATH, l.id, l.source, l.url)
