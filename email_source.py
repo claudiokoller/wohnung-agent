@@ -166,7 +166,18 @@ def _resolve(href, enabled):
             return href
 
 
+# Tracking-/Redirect-Hosts: NIE die Listing-ID aus dem Tracking-Link raten,
+# sondern erst auflösen und aus dem aufgelösten Ziel identifizieren. Sonst
+# matcht z.B. newhomes Versand-Host r.mailing.newhome.ch (enthält "newhome.ch")
+# fälschlich als Listing — mit zufälliger ID aus dem Token und kaputtem Link.
+_TRACKER_RE = re.compile(
+    r"r\.mailing\.|\.sendgrid\.net|/tr/cl/|/ls/click|/uni/ls/click|/redirect", re.I
+)
+
+
 def _identify(url):
+    if _TRACKER_RE.search(url):
+        return None, None, url   # Tracking-Link -> erst auflösen lassen
     for portal, pat in LISTING_PATTERNS.items():
         m = pat.search(url)
         if m:
