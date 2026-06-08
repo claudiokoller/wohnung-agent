@@ -46,7 +46,7 @@ import requests
 import config
 import db
 import notify
-from plz_lookup import find_gemeinde_name, find_plz, group_by_gemeinde
+from plz_lookup import find_gemeinde_name, find_plz, group_by_gemeinde, plz_to_gemeinde
 from application import build_blank_letter, build_letter
 from sources import Listing
 
@@ -216,7 +216,7 @@ def _status_text() -> str:
         else str(min_rooms or max_rooms or "—")
     )
     space_str = f"ab {min_space:.0f} m²" if min_space else "kein Limit"
-    plz_str   = ", ".join(state.get("plz_list", [])) or "kein Filter"
+    plz_str   = _fmt_plz(state.get("plz_list", [])) or "kein Filter"
     excl_str  = ", ".join(state.get("exclude_kw", [])) or "—"
     kw_str    = ", ".join(state.get("kw_list",    [])) or "—"
     verfstr   = state.get("verfuegbar_ab") or "kein Filter"
@@ -277,6 +277,16 @@ def _help_text() -> str:
 
 def _reply(chat_id: str, text: str):
     notify.reply(config.TELEGRAM_BOT_TOKEN, chat_id, text)
+
+
+def _fmt_plz(plz_list) -> str:
+    """Formatiert eine PLZ-Liste als '8800 (Thalwil), 8810 (Horgen)', nach PLZ
+    sortiert. PLZ ohne bekannten Gemeindenamen werden roh angezeigt."""
+    parts = []
+    for p in sorted(plz_list):
+        name = plz_to_gemeinde(p)
+        parts.append(f"{p} ({name})" if name else p)
+    return ", ".join(parts)
 
 
 def _answer_callback(callback_id: str, text: str = ""):
@@ -491,10 +501,10 @@ def handle_command(chat_id: str, text: str):
             if not current:
                 _reply(chat_id, "📍 PLZ-Filter ist leer (kein Filter aktiv).")
             else:
-                groups = group_by_gemeinde(current)
-                lines = ["📍 <b>PLZ-Filter</b>"]
-                for name, plz_list in groups:
-                    lines.append(f"• {name} ({', '.join(sorted(plz_list))})")
+                lines = [f"📍 <b>PLZ-Filter</b> ({len(current)})"]
+                for p in sorted(current):
+                    name = plz_to_gemeinde(p)
+                    lines.append(f"• {p} ({name})" if name else f"• {p}")
                 _reply(chat_id, "\n".join(lines))
 
         elif action == "add":
@@ -504,7 +514,7 @@ def handle_command(chat_id: str, text: str):
                 if plz not in current:
                     current.append(plz)
                 db.set_filter_state(config.DB_PATH, plz_list=current)
-                _reply(chat_id, f"✅ PLZ {plz} hinzugefügt. Aktuelle Liste: {', '.join(current)}")
+                _reply(chat_id, f"✅ PLZ {plz} hinzugefügt.\nAktuelle Liste: {_fmt_plz(current)}")
             else:
                 # Gemeindename → PLZ-Lookup
                 found = find_plz(plz)
@@ -517,7 +527,7 @@ def handle_command(chat_id: str, text: str):
                 db.set_filter_state(config.DB_PATH, plz_list=current)
                 _reply(chat_id,
                     f"✅ {name}: {len(added)} PLZ hinzugefügt ({', '.join(found)}).\n"
-                    f"Aktuelle Liste: {', '.join(current)}"
+                    f"Aktuelle Liste: {_fmt_plz(current)}"
                 )
 
         elif action == "del":
@@ -526,7 +536,7 @@ def handle_command(chat_id: str, text: str):
                 # Direkte PLZ
                 current = [p for p in current if p != plz]
                 db.set_filter_state(config.DB_PATH, plz_list=current)
-                _reply(chat_id, f"✅ PLZ {plz} entfernt. Aktuelle Liste: {', '.join(current) or '(leer)'}")
+                _reply(chat_id, f"✅ PLZ {plz} entfernt.\nAktuelle Liste: {_fmt_plz(current) or '(leer)'}")
             else:
                 # Gemeindename → alle zugehörigen PLZ entfernen
                 found = find_plz(plz)
@@ -539,13 +549,13 @@ def handle_command(chat_id: str, text: str):
                 db.set_filter_state(config.DB_PATH, plz_list=current)
                 _reply(chat_id,
                     f"✅ {name}: {len(removed)} PLZ entfernt ({', '.join(removed) or '—'}).\n"
-                    f"Aktuelle Liste: {', '.join(current) or '(leer = kein Filter)'}"
+                    f"Aktuelle Liste: {_fmt_plz(current) or '(leer = kein Filter)'}"
                 )
 
         elif action == "set":
             new_list = result["plz_list"]
             db.set_filter_state(config.DB_PATH, plz_list=new_list)
-            _reply(chat_id, f"✅ PLZ-Filter: {', '.join(new_list)}")
+            _reply(chat_id, f"✅ PLZ-Filter gesetzt:\n{_fmt_plz(new_list)}")
 
     # --- /exclude ---
     elif cmd == "exclude":

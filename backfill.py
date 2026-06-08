@@ -109,22 +109,33 @@ def main():
         diagnose(listings, fs)
         return
 
-    filtered = db.apply_filter(listings, fs)
-    print(f"Nach Filter (PLZ/Preis/Zimmer/Fläche): {len(filtered)}")
+    if "--plz-only" in sys.argv:
+        # Nur das PLZ-Kriterium (wichtigstes Kriterium); Preis/Zimmer/Fläche egal.
+        import re
+        plz_list = fs.get("plz_list", [])
+        good = [l for l in listings
+                if (m := re.match(r"^(\d{4})\b", (l.location or "").strip()))
+                and m.group(1) in plz_list]
+        print(f"PLZ-Treffer (nur PLZ, Preis/Zimmer ignoriert): {len(good)}\n")
+        for l in good:
+            print(f"  {l.location:18} | {l.price:12} | {l.rooms}Zi {l.space}m² | {l.url[:55]}")
+    else:
+        filtered = db.apply_filter(listings, fs)
+        print(f"Nach Filter (PLZ/Preis/Zimmer/Fläche): {len(filtered)}")
 
-    # Score-Verteilung
-    dist = {0: 0, 1: 0, 2: 0, 3: 0, 4: 0}
-    for l in filtered:
-        dist[es._data_score(l.price, l.rooms, l.space, l.location)] += 1
-    print(f"Score-Verteilung (4=alle Felder): {dist}")
+        # Score-Verteilung
+        dist = {0: 0, 1: 0, 2: 0, 3: 0, 4: 0}
+        for l in filtered:
+            dist[es._data_score(l.price, l.rooms, l.space, l.location)] += 1
+        print(f"Score-Verteilung (4=alle Felder): {dist}")
 
-    good = [l for l in filtered
-            if es._data_score(l.price, l.rooms, l.space, l.location) >= min_score]
-    print(f"Sendbar (score>={min_score}): {len(good)}\n")
+        good = [l for l in filtered
+                if es._data_score(l.price, l.rooms, l.space, l.location) >= min_score]
+        print(f"Sendbar (score>={min_score}): {len(good)}\n")
 
-    for l in good:
-        print(f"  [{l.source:10}] {l.location:18} | {l.price:12} | "
-              f"{l.rooms}Zi {l.space}m² | {l.title[:38]}")
+        for l in good:
+            print(f"  [{l.source:10}] {l.location:18} | {l.price:12} | "
+                  f"{l.rooms}Zi {l.space}m² | {l.title[:38]}")
 
     if not send:
         print("\nTrockenlauf — nichts gesendet. Mit '--send' wirklich senden.")
