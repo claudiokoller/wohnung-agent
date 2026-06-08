@@ -51,7 +51,9 @@ LISTING_PATTERNS = {
         r"immoscout24\.ch/(?:de/|fr/|it/|en/)?(?:d/[\w/-]*?|rent/|mieten/|louer/|affittare/)(\d{5,})"
     ),
     "newhome": re.compile(
-        r"newhome\.ch/(?:de/|fr/|it/)?[\w/-]*?(\d{6,})"
+        # Echtes Listing-Format ist newhome.ch/id/<id> — eng halten, sonst
+        # matchen suchabo/verlaengern/loeschen-Links (Zahlen aus der UUID).
+        r"newhome\.ch/(?:de/|fr/|it/)?id/(\d{5,})"
     ),
     "Flatfox": re.compile(
         r"flatfox\.ch/(?:de/|fr/|it/|en/)?flat/(\d+)"
@@ -150,22 +152,6 @@ def _alert_uids(M, unseen_only=True):
 
 # --- Parsing ---------------------------------------------------------------
 
-def _resolve(href, enabled):
-    """Tracking-Redirect auf die echte Listing-URL auflösen."""
-    if not enabled:
-        return href
-    try:
-        r = requests.head(href, allow_redirects=True, timeout=8, headers=_UA)
-        return r.url or href
-    except Exception:
-        try:
-            r = requests.get(href, allow_redirects=True, timeout=10,
-                              headers=_UA, stream=True)
-            return r.url or href
-        except Exception:
-            return href
-
-
 # Tracking-/Redirect-Hosts: NIE die Listing-ID aus dem Tracking-Link raten,
 # sondern erst auflösen und aus dem aufgelösten Ziel identifizieren. Sonst
 # matcht z.B. newhomes Versand-Host r.mailing.newhome.ch (enthält "newhome.ch")
@@ -173,6 +159,28 @@ def _resolve(href, enabled):
 _TRACKER_RE = re.compile(
     r"r\.mailing\.|\.sendgrid\.net|/tr/cl/|/ls/click|/uni/ls/click|/redirect", re.I
 )
+
+
+def _resolve(href, enabled):
+    """Tracking-Redirect auf die echte Listing-URL auflösen.
+
+    Erst HEAD (schnell). Bleibt das Ergebnis ein Tracking-Link (manche Versand-
+    Server wie newhomes Brevo leiten nur bei GET um), GET nachschieben."""
+    if not enabled:
+        return href
+    try:
+        r = requests.head(href, allow_redirects=True, timeout=8, headers=_UA)
+        url = r.url or href
+        if not _TRACKER_RE.search(url):
+            return url   # HEAD hat aufgelöst
+    except Exception:
+        pass
+    try:
+        r = requests.get(href, allow_redirects=True, timeout=10,
+                          headers=_UA, stream=True)
+        return r.url or href
+    except Exception:
+        return href
 
 
 def _identify(url):
