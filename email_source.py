@@ -31,6 +31,7 @@ socket.setdefaulttimeout(60)
 import requests
 from bs4 import BeautifulSoup
 
+import gmail_oauth
 from sources import Listing
 
 # Absender-Domains der Portal-Alert-Mails
@@ -129,7 +130,7 @@ def _html_body(msg):
 
 def _connect(cfg):
     M = imaplib.IMAP4_SSL(cfg.IMAP_HOST, cfg.IMAP_PORT)
-    M.login(cfg.IMAP_USER, cfg.IMAP_PASS)
+    gmail_oauth.imap_login(M, cfg)   # XOAUTH2 falls konfiguriert, sonst App-Passwort
     typ, data = M.select(cfg.IMAP_FOLDER)
     if typ != "OK":
         M.logout()

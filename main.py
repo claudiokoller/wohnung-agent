@@ -46,7 +46,12 @@ _AUTH_ALERT_INTERVAL_H = 6                  # Login-Warnung alle X Stunden wiede
 def _is_auth_error(e: Exception) -> bool:
     """Erkennt einen abgelehnten IMAP-Login (App-Passwort tot/widerrufen)."""
     s = str(e).upper()
-    return "AUTHENTICATIONFAILED" in s or "INVALID CREDENTIALS" in s
+    return (
+        "AUTHENTICATIONFAILED" in s
+        or "INVALID CREDENTIALS" in s
+        or "INVALID_GRANT" in s        # toter/widerrufener OAuth-Refresh-Token
+        or "INVALID_CLIENT" in s       # falsche OAuth-Client-ID/-Secret
+    )
 
 
 def _auth_ok():

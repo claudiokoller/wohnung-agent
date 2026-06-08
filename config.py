@@ -39,6 +39,15 @@ IMAP_USER   = os.getenv("WOHNUNGS_IMAP_USER", "deinmail@example.com")
 IMAP_PASS   = os.getenv("WOHNUNGS_IMAP_PASS", "APP_PASSWORT")
 IMAP_FOLDER = os.getenv("WOHNUNGS_IMAP_FOLDER", "INBOX")
 
+# --- OAuth2 (XOAUTH2) statt App-Passwort -----------------------------------
+# Dauerhafte Lösung gegen Googles ständig widerrufene App-Passwörter bei
+# Datacenter-Logins. Sind diese drei Werte gesetzt, loggt sich der Bot per
+# OAuth ein (App-Passwort wird ignoriert). Sind sie leer, bleibt alles beim
+# App-Passwort. Refresh-Token einmalig holen: python oauth_setup.py
+OAUTH_CLIENT_ID     = os.getenv("WOHNUNGS_OAUTH_CLIENT_ID", "")
+OAUTH_CLIENT_SECRET = os.getenv("WOHNUNGS_OAUTH_CLIENT_SECRET", "")
+OAUTH_REFRESH_TOKEN = os.getenv("WOHNUNGS_OAUTH_REFRESH_TOKEN", "")
+
 # False = verarbeitete Mails als gelesen markieren (verhindert Doppel-
 #         verarbeitung). True = Mails unangetastet lassen (nur Dedup via DB).
 IMAP_KEEP_UNREAD = False
