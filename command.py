@@ -729,7 +729,13 @@ def run():
     offset = _drain_pending_updates()
 
     while True:
-        _maybe_send_daily_summary()
+        # Backstop: kein Fehler im Loop-Körper (Tagesübersicht, DB-Lock, Telegram)
+        # darf den Command-Layer killen. Inner-Handler haben eigene try/except.
+        try:
+            _maybe_send_daily_summary()
+        except Exception as e:
+            print(f"Tagesübersicht-Fehler (weiter): {e}")
+
         updates = _get_updates(offset)
         for update in updates:
             offset = update["update_id"] + 1

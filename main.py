@@ -39,6 +39,44 @@ _source_failures: dict[str, int] = {}
 _MAX_FAILURES = 3          # ab hier Telegram-Warnung
 _HEARTBEAT_HOURS = 24      # nach X Stunden ohne Aktivität warnen
 _last_heartbeat_sent: datetime | None = None
+_last_auth_alert: datetime | None = None   # letzte Gmail-Login-Warnung
+_AUTH_ALERT_INTERVAL_H = 6                  # Login-Warnung alle X Stunden wiederholen
+
+
+def _is_auth_error(e: Exception) -> bool:
+    """Erkennt einen abgelehnten IMAP-Login (App-Passwort tot/widerrufen)."""
+    s = str(e).upper()
+    return "AUTHENTICATIONFAILED" in s or "INVALID CREDENTIALS" in s
+
+
+def _auth_ok():
+    """Login hat geklappt -> Warn-Zustand zurücksetzen."""
+    global _last_auth_alert
+    _last_auth_alert = None
+
+
+def _auth_alert(err):
+    """Sendet bei abgelehntem Gmail-Login sofort eine Telegram-Warnung und
+    wiederholt sie alle _AUTH_ALERT_INTERVAL_H Stunden, bis der Login wieder
+    klappt. Anders als der generische Fehlerzähler feuert das nicht nur einmal
+    und überlebt so einen tagelangen Ausfall nicht unbemerkt."""
+    global _last_auth_alert
+    now = datetime.now(timezone.utc)
+    if (_last_auth_alert
+            and (now - _last_auth_alert).total_seconds() < _AUTH_ALERT_INTERVAL_H * 3600):
+        return
+    notify.send_system(
+        config.TELEGRAM_BOT_TOKEN,
+        config.TELEGRAM_CHAT_IDS,
+        "🔴 <b>Gmail-Login abgelehnt</b> — der Bot kommt nicht ins Postfach und "
+        "empfängt KEINE Inserate.\n\n"
+        "Wahrscheinlich ist das App-Passwort abgelaufen/widerrufen. Neues unter "
+        "myaccount.google.com/apppasswords erstellen, in der .env auf dem VPS bei "
+        "<code>WOHNUNGS_IMAP_PASS</code> eintragen und Services neu starten.\n\n"
+        f"Fehler: {err}",
+    )
+    _last_auth_alert = now
+    print("Auth-Warnung an Telegram gesendet.")
 
 
 def _build_search(filter_state: dict) -> dict:
@@ -97,8 +135,11 @@ def run_once(seed=False):
             listings = src(search, config)
             _source_failures[name] = 0  # Fehler-Zähler zurücksetzen
             successful_srcs += 1        # Quelle hat funktioniert (auch 0 Treffer = OK)
+            _auth_ok()                  # Login klappt wieder -> Warn-Zustand löschen
         except Exception as e:
             print(f"Quelle {name} fehlgeschlagen: {e}")
+            if _is_auth_error(e):
+                _auth_alert(e)          # tote Zugangsdaten sofort + wiederholt melden
             _source_failures[name] = _source_failures.get(name, 0) + 1
             if _source_failures[name] == _MAX_FAILURES:
                 notify.send_system(

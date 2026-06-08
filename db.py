@@ -17,8 +17,12 @@ from contextlib import contextmanager
 
 @contextmanager
 def _conn(path):
-    con = sqlite3.connect(path)
+    # timeout/busy_timeout: drei Prozesse (main-loop, command, backfill) teilen
+    # sich die DB. WAL erlaubt parallele Leser + 1 Schreiber; busy_timeout lässt
+    # einen kollidierenden Schreiber kurz warten statt sofort «database is locked».
+    con = sqlite3.connect(path, timeout=10.0)
     con.row_factory = sqlite3.Row
+    con.execute("PRAGMA busy_timeout=10000")
     try:
         yield con
         con.commit()
@@ -426,13 +430,16 @@ def apply_filter(listings: list, filter_state: dict) -> list:
             if space_num is not None and space_num < min_space:
                 continue
 
-        # --- PLZ-Filter ---
-        # Nur filtern wenn in der Location eine 4-stellige PLZ erkannt wird.
-        # Fehlende/unparsbare Location -> durchlassen.
+        # --- PLZ-Filter (HARTES Kriterium) ---
+        # PLZ ist das wichtigste Kriterium und wird strikt durchgesetzt: bei
+        # gesetzter Liste MUSS das Inserat eine erkannte PLZ aus der Liste haben.
+        # Inserate ohne erkennbare PLZ werden VERWORFEN (Ausnahme vom sonstigen
+        # "lieber durchlassen"-Prinzip — bewusst, damit kein Inserat ausserhalb
+        # des Gebiets durchrutscht).
         if plz_list:
             loc = (l.location or "").strip()
             plz_m = re.match(r"^(\d{4})\b", loc)
-            if plz_m and plz_m.group(1) not in plz_list:
+            if not plz_m or plz_m.group(1) not in plz_list:
                 continue
 
         # --- Exclude-Keywords ---

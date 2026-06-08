@@ -100,6 +100,10 @@ statt Klassen. Kommentare auf Deutsch ok.
 
 **Filter-Prinzip:** Bei fehlenden/unparsbaren Feldern Inserat durchlassen
 (lieber zu viel als zu wenig). Filter nur bei sicher erkannten Werten.
+**Ausnahme — PLZ ist HART:** Die PLZ ist das wichtigste Kriterium und wird
+strikt durchgesetzt. Bei gesetzter `plz_list` wird ein Inserat OHNE erkannte
+PLZ aus der Liste **verworfen** (nicht durchgelassen). Diese Regel nicht
+aufweichen — der Parser liest die PLZ zuverlässig.
 
 **Parser-Diagnose:** `python main.py --dump-emails` zeigt geparste
 Listings direkt mit ✓/⚠-Flags pro Feld — wichtig nach Template-Änderungen

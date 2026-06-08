@@ -219,19 +219,42 @@ def test_filter_exclude_case_insensitive():
 
 
 def test_filter_fehlende_felder_durchlassen():
-    """Listings mit '?' oder '—' bei aktivem Filter durchlassen."""
+    """Listings mit '?' bei Preis/Zimmer/Fläche durchlassen — solange die PLZ passt."""
     listings = [
-        _listing(id="a", price="?", rooms="?", location="—"),
+        _listing(id="a", price="?", rooms="?", space="?", location="8001 Zürich"),
     ]
     state = {
         "max_price": 1000,   # sehr eng
         "min_rooms": 4.0,
         "max_rooms": 4.0,
+        "min_space": 80,
         "plz_list": ["8001"],
         "exclude_kw": [],
     }
     result = db.apply_filter(listings, state)
-    assert len(result) == 1  # durchgelassen trotz enger Filter
+    assert len(result) == 1  # Preis/Zimmer/Fläche unbekannt -> durchgelassen
+
+
+def test_filter_plz_strikt_ohne_plz_verworfen():
+    """PLZ ist hart: ohne erkennbare PLZ wird bei aktiver Liste VERWORFEN."""
+    listings = [
+        _listing(id="keine-plz", location="—"),
+        _listing(id="nur-stadt", location="Zürich"),
+        _listing(id="in-liste",  location="8001 Zürich"),
+    ]
+    state = {"max_price": None, "min_rooms": None, "max_rooms": None,
+             "plz_list": ["8001"], "exclude_kw": []}
+    result = db.apply_filter(listings, state)
+    assert [l.id for l in result] == ["in-liste"]
+
+
+def test_filter_plz_leer_kein_filter():
+    """Ohne PLZ-Liste werden auch Inserate ohne PLZ durchgelassen."""
+    listings = [_listing(id="keine-plz", location="—")]
+    state = {"max_price": None, "min_rooms": None, "max_rooms": None,
+             "plz_list": [], "exclude_kw": []}
+    result = db.apply_filter(listings, state)
+    assert len(result) == 1
 
 
 def test_filter_kein_state():
