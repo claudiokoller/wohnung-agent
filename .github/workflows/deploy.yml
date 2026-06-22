@@ -5,7 +5,31 @@ on:
     branches: [master]
 
 jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Python einrichten
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Abhängigkeiten installieren
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Syntax-/Import-Check
+        run: |
+          python -m compileall -q .
+          python -c "import config, db, sources, notify, email_source, gmail_oauth, application, main, command; print('imports ok')"
+
+      - name: Unit-Tests
+        run: python test_command.py
+
   deploy:
+    needs: test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
