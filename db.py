@@ -377,6 +377,36 @@ def count(path):
         return con.execute("SELECT COUNT(*) FROM seen").fetchone()[0]
 
 
+def get_unsent_listings(path, max_age_days: int = 2, limit: int = 10) -> list:
+    """Inserate, die in `listings` stehen, aber nie in `seen` kamen — also nie
+    erfolgreich zugestellt wurden (Versand-Blip/Rate-Limit/Crash zwischen upsert
+    und mark_seen). Begrenzt auf junge, nicht erledigte Inserate, damit kein
+    Alt-Bestand nachträglich rausgeschickt wird. Rückgabe als Listing-Objekte
+    für notify.send() (ohne Bild -> Versand als Text)."""
+    from sources import Listing
+    with _conn(path) as con:
+        rows = con.execute(
+            """
+            SELECT * FROM listings l
+            WHERE NOT EXISTS (SELECT 1 FROM seen s WHERE s.id = l.id)
+              AND (l.marked IS NULL OR l.marked NOT IN ('done', 'abgelehnt'))
+              AND l.first_seen >= datetime('now', ?)
+            ORDER BY l.first_seen ASC
+            LIMIT ?
+            """,
+            (f"-{int(max_age_days)} days", int(limit)),
+        ).fetchall()
+    return [
+        Listing(
+            id=r["id"], source=r["source"], title=r["title"] or "Wohnung",
+            price=r["price"] or "?", rooms=r["rooms"] or "?",
+            space=r["space"] or "?", location=r["location"] or "—",
+            url=r["url"] or "", image=None, available=r["available"],
+        )
+        for r in rows
+    ]
+
+
 # --- Filter-Logik -----------------------------------------------------------
 
 _MONTH_MAP = {

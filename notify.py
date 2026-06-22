@@ -1,9 +1,52 @@
 import html
+import time
 
 import requests
 
 
 _TELEGRAM_LIMIT = 4096  # Telegram-Zeichenlimit pro Nachricht
+_SEND_ATTEMPTS  = 4     # Versuche pro Nachricht bei transienten Fehlern
+_SEND_BACKOFF   = 3     # Basis-Wartezeit (s) zwischen Versuchen
+
+
+def _api_call(url: str, payload: dict, chat_id: str) -> bool:
+    """POST an die Telegram-API mit Retry. True = zugestellt.
+
+    Wiederholt bei transienten Fehlern (Timeout/Verbindung, HTTP 5xx) und
+    respektiert Rate-Limits (HTTP 429 -> retry_after). Permanente Fehler
+    (z.B. 400/403) werden NICHT wiederholt und geben False zurück, ohne den
+    Aufrufer zu blockieren."""
+    for attempt in range(1, _SEND_ATTEMPTS + 1):
+        try:
+            resp = requests.post(url, json=payload, timeout=15)
+        except Exception as e:
+            if attempt < _SEND_ATTEMPTS:
+                time.sleep(_SEND_BACKOFF * attempt)
+                continue
+            print(f"Telegram {chat_id}: Netzfehler nach {attempt} Versuchen — {e}")
+            return False
+
+        if resp.status_code == 200:
+            return True
+        if resp.status_code == 429:
+            # Rate-Limit: Telegram nennt die Wartezeit in parameters.retry_after
+            try:
+                retry_after = int(resp.json()["parameters"]["retry_after"])
+            except Exception:
+                retry_after = _SEND_BACKOFF * attempt
+            print(f"Telegram {chat_id}: 429 Rate-Limit, warte {retry_after}s")
+            time.sleep(min(retry_after, 60) + 1)
+            continue
+        if 500 <= resp.status_code < 600:
+            if attempt < _SEND_ATTEMPTS:
+                time.sleep(_SEND_BACKOFF * attempt)
+                continue
+            print(f"Telegram {chat_id}: {resp.status_code} (Server) nach {attempt} Versuchen")
+            return False
+        # Permanenter Client-Fehler (400 bad request, 403 blockiert, ...)
+        print(f"Telegram {chat_id}: {resp.status_code} {resp.text[:200]} — nicht wiederholt")
+        return False
+    return False
 
 
 def _truncate(text: str, limit: int = _TELEGRAM_LIMIT) -> str:
@@ -14,10 +57,12 @@ def _truncate(text: str, limit: int = _TELEGRAM_LIMIT) -> str:
     return text[:cutoff] + "\n\n<i>[Text gekürzt]</i>"
 
 
-def _post_photo(token, chat_id, photo_url, caption, reply_markup=None):
-    """Sendet ein Foto mit Caption. Fällt auf Text-Nachricht zurück wenn Foto fehlschlägt."""
+def _post_photo(token, chat_id, photo_url, caption, reply_markup=None) -> bool:
+    """Sendet ein Foto mit Caption. True = zugestellt. Fällt bei einem
+    permanenten Foto-Fehler (z.B. ungültige Bild-URL) auf eine Text-Nachricht
+    zurück und gibt deren Ergebnis zurück."""
     if not chat_id or chat_id.startswith(("DEIN_", "KOLLEGE_")):
-        return
+        return True   # Platzhalter -> nichts zu tun, nicht als Verlust werten
     payload = {
         "chat_id": chat_id,
         "photo": photo_url,
@@ -26,24 +71,16 @@ def _post_photo(token, chat_id, photo_url, caption, reply_markup=None):
     }
     if reply_markup:
         payload["reply_markup"] = reply_markup
-    try:
-        resp = requests.post(
-            f"https://api.telegram.org/bot{token}/sendPhoto",
-            json=payload,
-            timeout=15,
-        )
-        if resp.status_code == 200:
-            return
-        print(f"Telegram photo {chat_id}: {resp.status_code} — Fallback auf Text")
-    except Exception as e:
-        print(f"Telegram-Foto-Fehler an {chat_id}: {e}")
-    # Fallback
-    _post(token, chat_id, caption, reply_markup=reply_markup)
+    if _api_call(f"https://api.telegram.org/bot{token}/sendPhoto", payload, chat_id):
+        return True
+    # Foto endgültig nicht zustellbar -> wenigstens den Text senden
+    print(f"Telegram photo {chat_id}: Fallback auf Text")
+    return _post(token, chat_id, caption, reply_markup=reply_markup)
 
 
-def _post(token, chat_id, text, reply_markup=None):
+def _post(token, chat_id, text, reply_markup=None) -> bool:
     if not chat_id or chat_id.startswith(("DEIN_", "KOLLEGE_")):
-        return  # Platzhalter noch nicht ersetzt -> überspringen
+        return True  # Platzhalter noch nicht ersetzt -> überspringen, kein Verlust
     payload = {
         "chat_id": chat_id,
         "text": _truncate(text),
@@ -52,19 +89,13 @@ def _post(token, chat_id, text, reply_markup=None):
     }
     if reply_markup:
         payload["reply_markup"] = reply_markup
-    try:
-        resp = requests.post(
-            f"https://api.telegram.org/bot{token}/sendMessage",
-            json=payload,
-            timeout=15,
-        )
-        if resp.status_code != 200:
-            print(f"Telegram {chat_id}: {resp.status_code} {resp.text[:200]}")
-    except Exception as e:
-        print(f"Telegram-Fehler an {chat_id}: {e}")
+    return _api_call(f"https://api.telegram.org/bot{token}/sendMessage", payload, chat_id)
 
 
-def send(token, chat_ids, listing):
+def send(token, chat_ids, listing) -> bool:
+    """Sendet ein Inserat an alle chat_ids. True nur, wenn ALLE zugestellt
+    wurden — sonst False, damit der Aufrufer (main.run_once) es nicht als
+    'gesehen' markiert und der Resend-Sweep es erneut versucht."""
     text = listing.telegram_text()
     lid = listing.id
     keyboard = {"inline_keyboard": [
@@ -77,11 +108,13 @@ def send(token, chat_ids, listing):
             {"text": "❌ Weg",      "callback_data": f"weg_{lid}"},
         ],
     ]}
+    ok = True
     for chat_id in chat_ids:
         if listing.image:
-            _post_photo(token, chat_id, listing.image, text, reply_markup=keyboard)
+            ok = _post_photo(token, chat_id, listing.image, text, reply_markup=keyboard) and ok
         else:
-            _post(token, chat_id, text, reply_markup=keyboard)
+            ok = _post(token, chat_id, text, reply_markup=keyboard) and ok
+    return ok
 
 
 def send_daily_summary(token: str, chat_ids: list, stats: dict, listings: list):

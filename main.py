@@ -162,6 +162,24 @@ def _check_heartbeat():
         print(f"Heartbeat-Check fehlgeschlagen: {e}")
 
 
+def _resend_pending() -> int:
+    """Versucht Inserate erneut zu senden, die in der DB liegen, aber nie
+    erfolgreich zugestellt wurden (Versand-Blip/Rate-Limit/Crash zwischen upsert
+    und mark_seen). Stoppt beim ersten erneuten Fehlschlag — wenn Telegram noch
+    nicht erreichbar ist, hat ein Weiterversuch jetzt keinen Sinn."""
+    pending = db.get_unsent_listings(config.DB_PATH, max_age_days=2, limit=10)
+    sent = 0
+    for l in pending:
+        if notify.send(config.TELEGRAM_BOT_TOKEN, config.TELEGRAM_CHAT_IDS, l):
+            db.mark_seen(config.DB_PATH, l.id, l.source, l.url)
+            sent += 1
+        else:
+            break
+    if sent:
+        print(f"Resend-Sweep: {sent} offene(s) Inserat(e) nachgesendet.")
+    return sent
+
+
 def run_once(seed=False):
     db.init(config.DB_PATH)
     db.init_filter_state(config.DB_PATH, config.SEARCH)
@@ -172,6 +190,11 @@ def run_once(seed=False):
 
     new_count        = 0
     successful_srcs  = 0  # Quellen die ohne Exception durchliefen
+
+    # Zuerst Liegengebliebenes nachsenden (z.B. nach Telegram-/Netzausfall),
+    # damit der Rückstand abgebaut wird, bevor neue Mails verarbeitet werden.
+    if not seed and not paused:
+        new_count += _resend_pending()
 
     for src in SOURCES:
         name = src.__name__
@@ -217,11 +240,19 @@ def run_once(seed=False):
                 db.mark_seen(config.DB_PATH, l.id, l.source, l.url)
                 continue
 
-            if not seed and not paused:
-                notify.send(config.TELEGRAM_BOT_TOKEN, config.TELEGRAM_CHAT_IDS, l)
-                new_count += 1
+            if seed or paused:
+                # konsumieren ohne Versand (wie bisher: gesehen, aber nichts senden)
+                db.mark_seen(config.DB_PATH, l.id, l.source, l.url)
+                continue
 
-            db.mark_seen(config.DB_PATH, l.id, l.source, l.url)
+            if notify.send(config.TELEGRAM_BOT_TOKEN, config.TELEGRAM_CHAT_IDS, l):
+                new_count += 1
+                db.mark_seen(config.DB_PATH, l.id, l.source, l.url)
+            else:
+                # Versand fehlgeschlagen -> NICHT als gesehen markieren. Das Inserat
+                # liegt via upsert in der listings-Tabelle; der Resend-Sweep im
+                # nächsten Durchlauf versucht es erneut -> kein stiller Verlust.
+                print(f"Telegram-Versand fehlgeschlagen für {l.id} — bleibt offen (Resend folgt)")
 
     # Heartbeat: Aktivität tracken wenn mindestens eine Quelle erfolgreich lief
     # (auch 0 Treffer = Pipeline funktioniert — kein Alarm nötig)
