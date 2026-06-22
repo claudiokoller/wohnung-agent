@@ -82,6 +82,20 @@ def init(path):
             )
             """
         )
+        # Parse-Versuche pro Mail (Message-ID): erlaubt, eine Mail bei 0 geparsten
+        # Inseraten ein paar Durchläufe lang ungelesen zu lassen (Recovery bei
+        # transientem Parser-/Netz-Problem), ohne Bestätigungs-/Nicht-Inserat-
+        # Mails ewig erneut zu verarbeiten. Siehe email_source.fetch_email.
+        con.execute(
+            """
+            CREATE TABLE IF NOT EXISTS email_attempts (
+                msgid      TEXT PRIMARY KEY,
+                attempts   INTEGER DEFAULT 0,
+                first_seen TEXT DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+
         # Migrationen für bestehende DBs
         for col_sql in [
             "ALTER TABLE filter_state ADD COLUMN last_activity TEXT",
@@ -96,6 +110,25 @@ def init(path):
                 con.execute(col_sql)
             except Exception:
                 pass  # Spalte existiert bereits
+
+
+# --- Parse-Versuche pro Mail -----------------------------------------------
+
+def bump_email_attempt(path, msgid: str) -> int:
+    """Zählt einen Parse-Versuch für diese Mail (Message-ID) hoch und gibt die
+    neue Gesamtzahl zurück. Ohne Message-ID (manche Mails haben keine) wird 1
+    zurückgegeben, damit der Aufrufer sie einmalig behandelt und dann aufgibt."""
+    if not msgid:
+        return 1
+    with _conn(path) as con:
+        con.execute(
+            "INSERT INTO email_attempts (msgid, attempts) VALUES (?, 1) "
+            "ON CONFLICT(msgid) DO UPDATE SET attempts = attempts + 1",
+            (msgid,),
+        )
+        return con.execute(
+            "SELECT attempts FROM email_attempts WHERE msgid = ?", (msgid,)
+        ).fetchone()[0]
 
 
 # --- Filter-State -----------------------------------------------------------

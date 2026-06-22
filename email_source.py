@@ -22,6 +22,7 @@ import hashlib
 import imaplib
 import re
 import socket
+import time
 from concurrent.futures import ThreadPoolExecutor
 from email.header import decode_header
 
@@ -31,8 +32,32 @@ socket.setdefaulttimeout(60)
 import requests
 from bs4 import BeautifulSoup
 
+import db
 import gmail_oauth
 from sources import Listing
+
+# Diagnose des letzten fetch_email-Laufs (von main.py gelesen, um einen stillen
+# Parser-/Template-Bruch zu erkennen: Mails kommen an, aber 0 Inserate geparst).
+LAST_RUN = {"fetched": 0, "parsed": 0}
+
+# Nach so vielen 0-Treffer-Durchläufen wird eine Mail aufgegeben (als gelesen
+# markiert). Schützt echte Inserat-Mails über ein Reparatur-Fenster hinweg,
+# ohne Bestätigungs-/Nicht-Inserat-Mails endlos neu zu verarbeiten.
+_MAX_PARSE_ATTEMPTS = 5
+
+# Transiente IMAP-Fehler (mailbox.org/Heinlein drosselt zu schnelle Logins:
+# «[UNAVAILABLE] Temporary authentication failure»). Kein toter Login, sondern
+# kurz erneut versuchen.
+_TRANSIENT_RE = re.compile(
+    r"UNAVAILABLE|Temporary (?:authentication )?failure|temporar|try again|"
+    r"timed out|timeout|connection reset|EOF",
+    re.I,
+)
+
+
+def is_transient_error(e) -> bool:
+    """True bei vorübergehendem IMAP-/Netzfehler (Retry sinnvoll, kein Alarm)."""
+    return bool(_TRANSIENT_RE.search(str(e)))
 
 # Absender-Domains der Portal-Alert-Mails
 ALERT_SENDER_DOMAINS = [
@@ -128,17 +153,37 @@ def _html_body(msg):
     return html
 
 
-def _connect(cfg):
-    M = imaplib.IMAP4_SSL(cfg.IMAP_HOST, cfg.IMAP_PORT)
-    gmail_oauth.imap_login(M, cfg)   # XOAUTH2 falls konfiguriert, sonst App-Passwort
-    typ, data = M.select(cfg.IMAP_FOLDER)
-    if typ != "OK":
-        M.logout()
-        raise RuntimeError(
-            f"IMAP-Ordner «{cfg.IMAP_FOLDER}» nicht gefunden. "
-            f"Gmail-Label prüfen oder WOHNUNGS_IMAP_FOLDER anpassen."
-        )
-    return M
+def _connect(cfg, attempts: int = 3):
+    """Öffnet die IMAP-Verbindung und meldet sich an. Bei transienten Fehlern
+    (Drossel/Netz) bis zu `attempts`-mal mit Backoff erneut versuchen — ein
+    einzelner «Temporary authentication failure» soll keinen Durchlauf killen."""
+    last = None
+    for i in range(attempts):
+        M = None
+        try:
+            M = imaplib.IMAP4_SSL(cfg.IMAP_HOST, cfg.IMAP_PORT)
+            gmail_oauth.imap_login(M, cfg)   # XOAUTH2 falls konfiguriert, sonst Passwort
+            typ, data = M.select(cfg.IMAP_FOLDER)
+            if typ != "OK":
+                raise RuntimeError(
+                    f"IMAP-Ordner «{cfg.IMAP_FOLDER}» nicht gefunden. "
+                    f"WOHNUNGS_IMAP_FOLDER prüfen."
+                )
+            return M
+        except Exception as e:
+            last = e
+            if M is not None:
+                try:
+                    M.logout()
+                except Exception:
+                    pass
+            if i < attempts - 1 and is_transient_error(e):
+                wait = 5 * (i + 1)   # 5s, 10s
+                print(f"IMAP transient ({e}) — Retry {i + 1}/{attempts - 1} in {wait}s")
+                time.sleep(wait)
+                continue
+            raise
+    raise last   # nicht erreichbar, aber explizit
 
 
 def _alert_uids(M, unseen_only=True):
@@ -410,22 +455,45 @@ def fetch_email(search, cfg):
     """
     M = _connect(cfg)
     listings = []
+    fetched = 0
     try:
+        # 1. Erst alle Mails parsen, Ergebnis pro UID merken. Welche als gelesen
+        #    markiert werden, entscheiden wir DANACH — so geht bei einem Template-
+        #    Bruch (0 Inserate aus allen Mails) nichts unwiederbringlich verloren.
+        per_uid = []   # (uid, msgid, mail_listings)
         for uid in _alert_uids(M):
             typ, data = M.uid("fetch", uid, "(RFC822)")
             if typ != "OK" or not data or not data[0]:
                 continue
+            fetched += 1
             msg = email.message_from_bytes(data[0][1])
+            msgid = (msg.get("Message-ID") or "").strip()
             html = _html_body(msg)
-            if html:
-                listings.extend(
-                    _parse_html(html, cfg.RESOLVE_TRACKING_LINKS)
-                )
-            if not cfg.IMAP_KEEP_UNREAD:
-                M.uid("store", uid, "+FLAGS", "(\\Seen)")
+            mail_listings = _parse_html(html, cfg.RESOLVE_TRACKING_LINKS) if html else []
+            per_uid.append((uid, msgid, mail_listings))
+            listings.extend(mail_listings)
+
+        # mind. eine Mail lieferte Inserate -> Parser/Template sind gesund
+        batch_ok = any(ml for _, _, ml in per_uid)
+
+        # 2. Seen-Flags defensiv setzen
+        if not cfg.IMAP_KEEP_UNREAD:
+            for uid, msgid, ml in per_uid:
+                if ml or batch_ok:
+                    # geparst, ODER Parser gesund -> diese 0-Mail ist ein echtes
+                    # Nicht-Inserat (z.B. Bestätigungsmail): erledigt.
+                    mark = True
+                else:
+                    # ganze Charge leer -> evtl. Parser-/Netz-Problem. Mail noch
+                    # ein paar Durchläufe ungelesen lassen (Recovery), dann aufgeben.
+                    mark = db.bump_email_attempt(cfg.DB_PATH, msgid) >= _MAX_PARSE_ATTEMPTS
+                if mark:
+                    M.uid("store", uid, "+FLAGS", "(\\Seen)")
         M.close()
     finally:
         M.logout()
+    LAST_RUN["fetched"] = fetched
+    LAST_RUN["parsed"] = len(listings)
     return listings
 
 
