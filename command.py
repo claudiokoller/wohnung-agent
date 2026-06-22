@@ -29,6 +29,7 @@ Befehle (nur aus whitelisted Chat-IDs in config.TELEGRAM_CHAT_IDS):
 
   Info:
     /portale             Integrierte Quellen anzeigen
+    /backup              DB-Backup jetzt erstellen
 
   Hilfe:
     /help                Diese Liste
@@ -62,6 +63,10 @@ _WHITELIST: set[str] = {str(cid) for cid in config.TELEGRAM_CHAT_IDS}
 # Tagesübersicht: einmal täglich um 20:00 Zürich-Zeit
 _SUMMARY_HOUR = 20
 _last_summary_date: dt.date | None = None
+
+# DB-Backup: einmal täglich um 04:00 Zürich-Zeit (ruhige Stunde)
+_BACKUP_HOUR = 4
+_last_backup_date: dt.date | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -165,6 +170,31 @@ def _maybe_send_daily_summary():
     print(f"Tagesübersicht gesendet: {len(rows)} Inserate.")
 
 
+def _maybe_run_daily_backup():
+    """Einmal täglich ein konsistentes DB-Backup ziehen. Bei einem Problem
+    (Integritätscheck != ok oder Fehler) eine Telegram-Warnung schicken — eine
+    stille DB-Korruption soll nicht unbemerkt bleiben."""
+    global _last_backup_date
+    now = dt.datetime.now(ZoneInfo("Europe/Zurich"))
+    if now.hour != _BACKUP_HOUR:
+        return
+    today = now.date()
+    if _last_backup_date == today:
+        return
+    _last_backup_date = today
+    r = db.backup_db(config.DB_PATH)
+    if r["ok"]:
+        print(f"DB-Backup ok: {r['file']} ({r['size']} B), integrity={r['integrity']}, {r['kept']} behalten.")
+    else:
+        problem = r.get("error") or f"Integritätscheck: {r['integrity']}"
+        print(f"DB-Backup-Problem: {problem}")
+        notify.send_system(
+            config.TELEGRAM_BOT_TOKEN, config.TELEGRAM_CHAT_IDS,
+            f"⚠️ <b>DB-Backup-Problem</b>: {problem}\n"
+            f"DB-Datei auf dem VPS prüfen.",
+        )
+
+
 def _stats_text() -> str:
     from datetime import datetime, timezone
     stats = db.count_stats(config.DB_PATH)
@@ -266,7 +296,8 @@ def _help_text() -> str:
         "/delete &lt;id&gt; — als erledigt markieren\n"
         "/cleanup — erledigte Inserate aus DB löschen\n\n"
         "<b>Info:</b>\n"
-        "/portale — integrierte Quellen anzeigen\n\n"
+        "/portale — integrierte Quellen anzeigen\n"
+        "/backup — DB-Backup jetzt erstellen\n\n"
         "<i>Beispiel: /beworben homegate-3456789</i>"
     )
 
@@ -683,6 +714,21 @@ def handle_command(chat_id: str, text: str):
         lines += [f"  {d}" for d in ALERT_SENDER_DOMAINS]
         _reply(chat_id, "📡 <b>Integrierte Portale</b>\n\n" + "\n".join(lines))
 
+    # --- /backup ---
+    elif cmd == "backup":
+        _reply(chat_id, "💾 Erstelle DB-Backup…")
+        r = db.backup_db(config.DB_PATH)
+        if r["ok"]:
+            kb = r["size"] / 1024
+            _reply(
+                chat_id,
+                f"✅ Backup erstellt ({kb:.0f} KB, Integrität: {r['integrity']}).\n"
+                f"<code>{r['file']}</code>\n{r['kept']} Backups aufbewahrt.",
+            )
+        else:
+            problem = r.get("error") or f"Integritätscheck: {r['integrity']}"
+            _reply(chat_id, f"⚠️ Backup-Problem: {problem}")
+
     # --- Unbekannt ---
     else:
         _reply(chat_id, "❓ Unbekannter Befehl. /help für die Befehlsliste.")
@@ -745,6 +791,11 @@ def run():
             _maybe_send_daily_summary()
         except Exception as e:
             print(f"Tagesübersicht-Fehler (weiter): {e}")
+
+        try:
+            _maybe_run_daily_backup()
+        except Exception as e:
+            print(f"DB-Backup-Fehler (weiter): {e}")
 
         updates = _get_updates(offset)
         for update in updates:

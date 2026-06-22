@@ -10,6 +10,7 @@ Modi:
   python main.py --dump-emails  rohe HTML-Bodies der Portal-Mails speichern,
                                 um die IMAP-Parser zu tunen (sendet nichts,
                                 markiert nichts als gelesen)
+  python main.py --backup       konsistentes DB-Backup + Integritätscheck
 
 Quellen:
   - fetch_email : Suchabo-Mails von Homegate/ImmoScout24/newhome/Flatfox
@@ -275,6 +276,14 @@ if __name__ == "__main__":
         dump_emails(config, all_emails=True)
     elif "--dump-emails" in sys.argv:
         dump_emails(config)
+    elif "--backup" in sys.argv:
+        db.init(config.DB_PATH)
+        r = db.backup_db(config.DB_PATH)
+        if r["ok"]:
+            print(f"Backup ok: {r['file']} ({r['size']} B), integrity={r['integrity']}, {r['kept']} behalten.")
+        else:
+            print(f"Backup-Problem: {r.get('error') or r['integrity']}")
+            sys.exit(1)
     elif "--seed" in sys.argv:
         run_once(seed=True)
     elif "--loop" in sys.argv:

@@ -10,9 +10,11 @@ Migration: init_filter_state() seedet filter_state beim ersten Start
 aus config.SEARCH. Danach ist die DB führend.
 """
 import json
+import os
 import re
 import sqlite3
 from contextlib import contextmanager
+from datetime import datetime, timezone
 
 
 @contextmanager
@@ -375,6 +377,58 @@ def mark_seen(path, listing_id, source, url):
 def count(path):
     with _conn(path) as con:
         return con.execute("SELECT COUNT(*) FROM seen").fetchone()[0]
+
+
+def backup_db(path, dest_dir: str | None = None, keep: int = 14) -> dict:
+    """Konsistentes Backup der SQLite-DB — auch im laufenden Betrieb sicher.
+
+    Nutzt `VACUUM INTO` (sauberer, kompakter Snapshot inkl. WAL-Inhalt) statt
+    rohem Dateikopieren, das mit WAL inkonsistent sein kann. Davor ein schneller
+    Integritätscheck (PRAGMA quick_check). Behält die letzten `keep` Snapshots.
+
+    Rückgabe: dict(ok, integrity, file, size, kept, error)."""
+    res = {"ok": False, "integrity": None, "file": None, "size": 0, "kept": 0, "error": None}
+    try:
+        if dest_dir is None:
+            base = os.path.dirname(os.path.abspath(path)) or "."
+            dest_dir = os.path.join(base, "backups")
+        os.makedirs(dest_dir, exist_ok=True)
+
+        # Mikrosekunden im Namen: VACUUM INTO scheitert bei existierender Datei,
+        # zwei Backups in derselben Sekunde würden sonst kollidieren.
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S-%f")
+        out = os.path.join(dest_dir, f"listings-{stamp}.db")
+
+        # Eigene Verbindung im Autocommit-Modus: VACUUM darf NICHT in einer
+        # offenen Transaktion laufen (sonst «cannot VACUUM from within a transaction»).
+        con = sqlite3.connect(path, timeout=30.0)
+        con.isolation_level = None
+        try:
+            res["integrity"] = con.execute("PRAGMA quick_check").fetchone()[0]
+            safe = out.replace("'", "''")   # Pfad für SQL-String-Literal quoten
+            con.execute(f"VACUUM INTO '{safe}'")
+        finally:
+            con.close()
+
+        res["file"] = out
+        res["size"] = os.path.getsize(out)
+
+        # Rotation: nur unsere Snapshots, älteste über `keep` hinaus löschen
+        snaps = sorted(
+            f for f in os.listdir(dest_dir)
+            if f.startswith("listings-") and f.endswith(".db")
+        )
+        if keep > 0:
+            for old in snaps[:-keep]:
+                try:
+                    os.remove(os.path.join(dest_dir, old))
+                except OSError:
+                    pass
+        res["kept"] = min(len(snaps), keep) if keep > 0 else len(snaps)
+        res["ok"] = (res["integrity"] == "ok")
+    except Exception as e:
+        res["error"] = str(e)
+    return res
 
 
 def get_unsent_listings(path, max_age_days: int = 2, limit: int = 10) -> list:
