@@ -31,12 +31,14 @@ SEARCH = {
 # --- IMAP: Portal-Alert-Mails (Homegate / ImmoScout24 / newhome / Flatfox) ---
 # Du richtest auf den Portalen normale Suchabos ein -> die Treffer-Mails
 # werden hier per IMAP geholt und in dieselbe Pipeline gespeist.
-# Gmail: App-Passwort nötig (normales Passwort geht bei IMAP nicht).
-# Empfehlung: Gmail-Filter -> Label "wohnung", dann IMAP_FOLDER = "wohnung".
-IMAP_HOST   = os.getenv("WOHNUNGS_IMAP_HOST", "imap.gmail.com")
+# Aktueller Provider: mailbox.org (imap.mailbox.org:993). Login mit voller
+# E-Mail-Adresse + Passwort (oder App-Passwort aus den mailbox.org-Settings).
+# mailbox.org toleriert Datacenter-Logins vom VPS — anders als Gmail.
+# Optional: Server-Filter -> Ordner "wohnung", dann IMAP_FOLDER = "wohnung".
+IMAP_HOST   = os.getenv("WOHNUNGS_IMAP_HOST", "imap.mailbox.org")
 IMAP_PORT   = int(os.getenv("WOHNUNGS_IMAP_PORT", "993"))
-IMAP_USER   = os.getenv("WOHNUNGS_IMAP_USER", "deinmail@example.com")
-IMAP_PASS   = os.getenv("WOHNUNGS_IMAP_PASS", "APP_PASSWORT")
+IMAP_USER   = os.getenv("WOHNUNGS_IMAP_USER", "deinmail@mailbox.org")
+IMAP_PASS   = os.getenv("WOHNUNGS_IMAP_PASS", "PASSWORT")
 IMAP_FOLDER = os.getenv("WOHNUNGS_IMAP_FOLDER", "INBOX")
 
 # --- OAuth2 (XOAUTH2) statt App-Passwort -----------------------------------
@@ -86,4 +88,4 @@ DRAFT_IN_TELEGRAM   = True   # Entwurf als kopierfertige Telegram-Nachricht
 DRAFT_SAVE_FILES    = False  # Entwurf zusätzlich als .txt nach ./drafts/
 DRAFT_IMAP_APPEND   = False  # Entwurf als echte Draft-Mail ins Postfach legen
 # Provider-spezifisch: Gmail "[Gmail]/Drafts", GMX "Entwürfe" o.ä.
-DRAFT_IMAP_FOLDER   = os.getenv("WOHNUNGS_DRAFT_FOLDER", "[Gmail]/Drafts")
+DRAFT_IMAP_FOLDER   = os.getenv("WOHNUNGS_DRAFT_FOLDER", "Drafts")
