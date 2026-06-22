@@ -29,6 +29,7 @@ Befehle (nur aus whitelisted Chat-IDs in config.TELEGRAM_CHAT_IDS):
 
   Info:
     /portale             Integrierte Quellen anzeigen
+    /health              Zustand des Bots auf einen Blick
     /backup              DB-Backup jetzt erstellen
 
   Hilfe:
@@ -37,6 +38,7 @@ Befehle (nur aus whitelisted Chat-IDs in config.TELEGRAM_CHAT_IDS):
 
 import datetime as dt
 import html
+import os
 import re
 import threading
 import time
@@ -170,10 +172,26 @@ def _maybe_send_daily_summary():
     print(f"Tagesübersicht gesendet: {len(rows)} Inserate.")
 
 
+def _backup_and_offsite(caption_prefix: str) -> dict:
+    """Backup ziehen und bei Erfolg als Off-site-Kopie in die Telegram-Gruppe
+    hochladen (überlebt einen Totalverlust des VPS). Setzt r['uploaded']."""
+    r = db.backup_db(config.DB_PATH)
+    r["uploaded"] = False
+    if r["ok"] and r.get("file"):
+        try:
+            r["uploaded"] = notify.send_document(
+                config.TELEGRAM_BOT_TOKEN, config.TELEGRAM_CHAT_IDS, r["file"],
+                caption=f"{caption_prefix} · {r['size'] // 1024} KB · Integrität: {r['integrity']}",
+            )
+        except Exception as e:
+            print(f"Backup-Upload fehlgeschlagen (weiter): {e}")
+    return r
+
+
 def _maybe_run_daily_backup():
-    """Einmal täglich ein konsistentes DB-Backup ziehen. Bei einem Problem
-    (Integritätscheck != ok oder Fehler) eine Telegram-Warnung schicken — eine
-    stille DB-Korruption soll nicht unbemerkt bleiben."""
+    """Einmal täglich ein konsistentes DB-Backup ziehen und off-site sichern.
+    Bei einem Problem (Integritätscheck != ok oder Fehler) eine Telegram-Warnung
+    schicken — eine stille DB-Korruption soll nicht unbemerkt bleiben."""
     global _last_backup_date
     now = dt.datetime.now(ZoneInfo("Europe/Zurich"))
     if now.hour != _BACKUP_HOUR:
@@ -182,9 +200,10 @@ def _maybe_run_daily_backup():
     if _last_backup_date == today:
         return
     _last_backup_date = today
-    r = db.backup_db(config.DB_PATH)
+    r = _backup_and_offsite("💾 Tägliches DB-Backup")
     if r["ok"]:
-        print(f"DB-Backup ok: {r['file']} ({r['size']} B), integrity={r['integrity']}, {r['kept']} behalten.")
+        print(f"DB-Backup ok: {r['file']} ({r['size']} B), integrity={r['integrity']}, "
+              f"{r['kept']} behalten, off-site={r['uploaded']}.")
     else:
         problem = r.get("error") or f"Integritätscheck: {r['integrity']}"
         print(f"DB-Backup-Problem: {problem}")
@@ -193,6 +212,67 @@ def _maybe_run_daily_backup():
             f"⚠️ <b>DB-Backup-Problem</b>: {problem}\n"
             f"DB-Datei auf dem VPS prüfen.",
         )
+
+
+def _health_text() -> str:
+    """Zustand des Bots auf einen Blick: letzter Poll, geparste Mails, offene
+    Resends, letztes Backup, DB-Größe. Liest prozessübergreifend aus der DB
+    (der --loop schreibt die Poll-Stats in die meta-Tabelle)."""
+    now = dt.datetime.now(dt.timezone.utc)
+
+    def _ago(iso: str | None) -> str:
+        if not iso:
+            return "—"
+        try:
+            t = dt.datetime.fromisoformat(iso)
+            if t.tzinfo is None:
+                t = t.replace(tzinfo=dt.timezone.utc)
+            mins = int((now - t).total_seconds() / 60)
+            if mins < 60:
+                return f"vor {mins} Min."
+            if mins < 1440:
+                return f"vor {mins // 60}h {mins % 60}min"
+            return f"vor {mins // 1440}d"
+        except Exception:
+            return str(iso)
+
+    state   = db.get_filter_state(config.DB_PATH)
+    last_p  = db.get_meta(config.DB_PATH, "last_poll")
+    fetched = db.get_meta(config.DB_PATH, "last_fetched", "?")
+    parsed  = db.get_meta(config.DB_PATH, "last_parsed", "?")
+    pending = len(db.get_unsent_listings(config.DB_PATH))
+    seen    = db.count(config.DB_PATH)
+
+    # Letztes Backup aus dem backups/-Ordner neben der DB
+    base = os.path.dirname(os.path.abspath(config.DB_PATH)) or "."
+    bdir = os.path.join(base, "backups")
+    backup_line = "keines"
+    try:
+        snaps = sorted(f for f in os.listdir(bdir)
+                       if f.startswith("listings-") and f.endswith(".db"))
+        if snaps:
+            fp = os.path.join(bdir, snaps[-1])
+            mt = dt.datetime.fromtimestamp(os.path.getmtime(fp), dt.timezone.utc).isoformat()
+            backup_line = f"{_ago(mt)} · {os.path.getsize(fp) // 1024} KB · {len(snaps)} gesamt"
+    except Exception:
+        pass
+
+    try:
+        db_kb = os.path.getsize(config.DB_PATH) // 1024
+    except Exception:
+        db_kb = 0
+
+    parse_warn = " ⚠️" if (str(fetched).isdigit() and int(fetched) > 0 and str(parsed) == "0") else ""
+    return (
+        "🩺 <b>Bot-Health</b>\n\n"
+        f"{'⏸ Pausiert' if state.get('paused') else '▶️ Aktiv'}\n"
+        f"📡 Letzter Poll: {_ago(last_p)}\n"
+        f"📨 Letzter Durchlauf: {fetched} Mail(s) empfangen, {parsed} geparst{parse_warn}\n"
+        f"📤 Offene Resends: {pending}{' ⚠️' if pending else ''}\n"
+        f"🗂 Inserate gesehen: {seen}\n"
+        f"💾 Letztes Backup: {backup_line}\n"
+        f"🗄 DB-Größe: {db_kb} KB"
+    )
 
 
 def _stats_text() -> str:
@@ -297,6 +377,7 @@ def _help_text() -> str:
         "/cleanup — erledigte Inserate aus DB löschen\n\n"
         "<b>Info:</b>\n"
         "/portale — integrierte Quellen anzeigen\n"
+        "/health — Zustand des Bots auf einen Blick\n"
         "/backup — DB-Backup jetzt erstellen\n\n"
         "<i>Beispiel: /beworben homegate-3456789</i>"
     )
@@ -714,16 +795,21 @@ def handle_command(chat_id: str, text: str):
         lines += [f"  {d}" for d in ALERT_SENDER_DOMAINS]
         _reply(chat_id, "📡 <b>Integrierte Portale</b>\n\n" + "\n".join(lines))
 
+    # --- /health ---
+    elif cmd == "health":
+        _reply(chat_id, _health_text())
+
     # --- /backup ---
     elif cmd == "backup":
         _reply(chat_id, "💾 Erstelle DB-Backup…")
-        r = db.backup_db(config.DB_PATH)
+        r = _backup_and_offsite("💾 DB-Backup (manuell)")
         if r["ok"]:
             kb = r["size"] / 1024
+            offsite = "als Dokument hochgeladen" if r["uploaded"] else "Upload fehlgeschlagen"
             _reply(
                 chat_id,
                 f"✅ Backup erstellt ({kb:.0f} KB, Integrität: {r['integrity']}).\n"
-                f"<code>{r['file']}</code>\n{r['kept']} Backups aufbewahrt.",
+                f"<code>{r['file']}</code>\n{r['kept']} Backups aufbewahrt · off-site: {offsite}.",
             )
         else:
             problem = r.get("error") or f"Integritätscheck: {r['integrity']}"

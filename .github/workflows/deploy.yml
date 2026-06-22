@@ -23,7 +23,7 @@ jobs:
       - name: Syntax-/Import-Check
         run: |
           python -m compileall -q .
-          python -c "import config, db, sources, notify, email_source, gmail_oauth, application, main, command; print('imports ok')"
+          python -c "import config, db, sources, notify, email_source, imap_auth, application, main, command; print('imports ok')"
 
       - name: Unit-Tests
         run: python test_command.py

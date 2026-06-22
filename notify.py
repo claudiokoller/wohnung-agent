@@ -159,6 +159,53 @@ def send_system(token: str, chat_ids: list, text: str):
         _post(token, chat_id, text)
 
 
+def send_document(token, chat_ids, file_path: str, caption: str = "") -> bool:
+    """Lädt eine Datei als Dokument in alle chat_ids hoch (z.B. DB-Backup als
+    Off-site-Kopie -> liegt danach in Telegrams Cloud). True nur, wenn überall
+    zugestellt. Eigene Retry-Schleife wie _api_call, aber mit Multipart-Upload."""
+    ok = True
+    for chat_id in chat_ids:
+        if not chat_id or chat_id.startswith(("DEIN_", "KOLLEGE_")):
+            continue
+        delivered = False
+        for attempt in range(1, _SEND_ATTEMPTS + 1):
+            try:
+                with open(file_path, "rb") as fh:
+                    resp = requests.post(
+                        f"https://api.telegram.org/bot{token}/sendDocument",
+                        data={
+                            "chat_id": chat_id,
+                            "caption": _truncate(caption, 1024),
+                            "parse_mode": "HTML",
+                        },
+                        files={"document": fh},
+                        timeout=60,
+                    )
+            except Exception as e:
+                if attempt < _SEND_ATTEMPTS:
+                    time.sleep(_SEND_BACKOFF * attempt)
+                    continue
+                print(f"Telegram doc {chat_id}: Netzfehler nach {attempt} Versuchen — {e}")
+                break
+            if resp.status_code == 200:
+                delivered = True
+                break
+            if resp.status_code == 429:
+                try:
+                    retry_after = int(resp.json()["parameters"]["retry_after"])
+                except Exception:
+                    retry_after = _SEND_BACKOFF * attempt
+                time.sleep(min(retry_after, 60) + 1)
+                continue
+            if 500 <= resp.status_code < 600 and attempt < _SEND_ATTEMPTS:
+                time.sleep(_SEND_BACKOFF * attempt)
+                continue
+            print(f"Telegram doc {chat_id}: {resp.status_code} {resp.text[:200]}")
+            break
+        ok = delivered and ok
+    return ok
+
+
 def reply(token: str, chat_id: str, text: str):
     """Einzelne Antwort an einen Chat (für den Command-Layer)."""
     _post(token, chat_id, text)

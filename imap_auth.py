@@ -1,17 +1,15 @@
 """
-Gmail OAuth2 (XOAUTH2) für IMAP.
+IMAP-Login — providerneutral.
 
-Hintergrund: Gmail widerruft App-Passwörter bei Dauer-Logins von einer
-Rechenzentrums-IP immer wieder -> der Feed reißt ab. Ein OAuth-Refresh-Token
-stirbt nicht so und ist der von Google vorgesehene Weg für Server.
+`imap_login()` meldet eine offene imaplib-Verbindung an:
+- Sind OAuth-Werte konfiguriert (Client-ID/Secret/Refresh-Token), per
+  SASL-XOAUTH2 (Gmail-tauglich; Refresh-Token einmalig via oauth_setup.py).
+- Sonst klassisch mit Benutzer + Passwort (aktueller Weg: mailbox.org).
 
-Dieses Modul tauscht den langlebigen Refresh-Token gegen kurzlebige
-Access-Tokens und meldet sich damit per SASL-XOAUTH2 am IMAP-Server an.
+Hintergrund OAuth: Gmail widerrief App-Passwörter bei Dauer-Logins von einer
+Rechenzentrums-IP immer wieder. Seit dem Wechsel auf mailbox.org wird der
+klassische Passwort-Login genutzt; der OAuth-Pfad bleibt als Option erhalten.
 Der Refresh läuft über `requests` (kein google-Paket auf dem VPS nötig).
-Den Refresh-Token holst du einmalig mit `python oauth_setup.py`.
-
-Ist kein Refresh-Token konfiguriert, fällt `imap_login()` automatisch auf
-den klassischen App-Passwort-Login zurück -> nichts bricht.
 """
 import base64
 import time

@@ -84,6 +84,17 @@ def init(path):
             )
             """
         )
+        # Key-Value-Laufzeitzustand (prozessübergreifend lesbar): der --loop
+        # schreibt Poll-Stats hierher, der Command-Layer liest sie für /health.
+        con.execute(
+            """
+            CREATE TABLE IF NOT EXISTS meta (
+                key   TEXT PRIMARY KEY,
+                value TEXT
+            )
+            """
+        )
+
         # Parse-Versuche pro Mail (Message-ID): erlaubt, eine Mail bei 0 geparsten
         # Inseraten ein paar Durchläufe lang ungelesen zu lassen (Recovery bei
         # transientem Parser-/Netz-Problem), ohne Bestätigungs-/Nicht-Inserat-
@@ -112,6 +123,23 @@ def init(path):
                 con.execute(col_sql)
             except Exception:
                 pass  # Spalte existiert bereits
+
+
+# --- Laufzeitzustand (key/value) -------------------------------------------
+
+def set_meta(path, key: str, value) -> None:
+    with _conn(path) as con:
+        con.execute(
+            "INSERT INTO meta (key, value) VALUES (?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            (key, str(value)),
+        )
+
+
+def get_meta(path, key: str, default=None):
+    with _conn(path) as con:
+        row = con.execute("SELECT value FROM meta WHERE key = ?", (key,)).fetchone()
+        return row[0] if row else default
 
 
 # --- Parse-Versuche pro Mail -----------------------------------------------

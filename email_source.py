@@ -33,7 +33,7 @@ import requests
 from bs4 import BeautifulSoup
 
 import db
-import gmail_oauth
+import imap_auth
 from sources import Listing
 
 # Diagnose des letzten fetch_email-Laufs (von main.py gelesen, um einen stillen
@@ -162,7 +162,7 @@ def _connect(cfg, attempts: int = 3):
         M = None
         try:
             M = imaplib.IMAP4_SSL(cfg.IMAP_HOST, cfg.IMAP_PORT)
-            gmail_oauth.imap_login(M, cfg)   # XOAUTH2 falls konfiguriert, sonst Passwort
+            imap_auth.imap_login(M, cfg)   # XOAUTH2 falls konfiguriert, sonst Passwort
             typ, data = M.select(cfg.IMAP_FOLDER)
             if typ != "OK":
                 raise RuntimeError(

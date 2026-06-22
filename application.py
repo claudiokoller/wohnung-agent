@@ -161,9 +161,9 @@ def imap_append_draft(listing, subject, body, cfg):
         body + f"\n\n---\nInserat: {listing.url}\n(via {listing.source})"
     )
     try:
-        import gmail_oauth
+        import imap_auth
         M = imaplib.IMAP4_SSL(cfg.IMAP_HOST, cfg.IMAP_PORT)
-        gmail_oauth.imap_login(M, cfg)   # XOAUTH2 falls konfiguriert, sonst App-Passwort
+        imap_auth.imap_login(M, cfg)   # XOAUTH2 falls konfiguriert, sonst App-Passwort
         M.append(
             cfg.DRAFT_IMAP_FOLDER,
             "(\\Draft)",

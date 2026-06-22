@@ -259,6 +259,11 @@ def run_once(seed=False):
     # (auch 0 Treffer = Pipeline funktioniert — kein Alarm nötig)
     if successful_srcs > 0:
         db.set_last_activity(config.DB_PATH)
+        # Poll-Stats prozessübergreifend ablegen, damit /health (command.py)
+        # sie lesen kann — main läuft in einem eigenen Prozess.
+        db.set_meta(config.DB_PATH, "last_poll", datetime.now(timezone.utc).isoformat())
+        db.set_meta(config.DB_PATH, "last_fetched", email_source.LAST_RUN.get("fetched", 0))
+        db.set_meta(config.DB_PATH, "last_parsed", email_source.LAST_RUN.get("parsed", 0))
 
     if not seed:
         _check_heartbeat()
