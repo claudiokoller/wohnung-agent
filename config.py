@@ -37,7 +37,7 @@ SEARCH = {
 # Optional: Server-Filter -> Ordner "wohnung", dann IMAP_FOLDER = "wohnung".
 IMAP_HOST   = os.getenv("WOHNUNGS_IMAP_HOST", "imap.mailbox.org")
 IMAP_PORT   = int(os.getenv("WOHNUNGS_IMAP_PORT", "993"))
-IMAP_USER   = os.getenv("WOHNUNGS_IMAP_USER", "deinmail@mailbox.org")
+IMAP_USER   = os.getenv("WOHNUNGS_IMAP_USER", "wohnung.suchen@example.org")
 IMAP_PASS   = os.getenv("WOHNUNGS_IMAP_PASS", "PASSWORT")
 IMAP_FOLDER = os.getenv("WOHNUNGS_IMAP_FOLDER", "INBOX")
 
