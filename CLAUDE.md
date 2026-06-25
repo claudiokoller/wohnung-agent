@@ -64,7 +64,7 @@ Telegram-Feed für eine 2er-WG-Suche (Max + Sam). Architektur:
 | `/cleanup` | Erledigte Inserate aus DB löschen |
 | `/portale` | Integrierte Portale anzeigen |
 | `/health` | Zustand: letzter Poll, empfangen/geparst, offene Resends, letztes Backup, DB-Größe |
-| `/backup` | Konsistentes DB-Backup jetzt erstellen + Off-site-Kopie in die Gruppe laden |
+| `/backup` | Konsistentes lokales DB-Backup jetzt erstellen (mit Integritätscheck) |
 | `/help` | Alle Befehle |
 
 ### Inline-Buttons (pro Inserat)

@@ -172,24 +172,8 @@ def _maybe_send_daily_summary():
     print(f"Tagesübersicht gesendet: {len(rows)} Inserate.")
 
 
-def _backup_and_offsite(caption_prefix: str) -> dict:
-    """Backup ziehen und bei Erfolg als Off-site-Kopie in die Telegram-Gruppe
-    hochladen (überlebt einen Totalverlust des VPS). Setzt r['uploaded']."""
-    r = db.backup_db(config.DB_PATH)
-    r["uploaded"] = False
-    if r["ok"] and r.get("file"):
-        try:
-            r["uploaded"] = notify.send_document(
-                config.TELEGRAM_BOT_TOKEN, config.TELEGRAM_CHAT_IDS, r["file"],
-                caption=f"{caption_prefix} · {r['size'] // 1024} KB · Integrität: {r['integrity']}",
-            )
-        except Exception as e:
-            print(f"Backup-Upload fehlgeschlagen (weiter): {e}")
-    return r
-
-
 def _maybe_run_daily_backup():
-    """Einmal täglich ein konsistentes DB-Backup ziehen und off-site sichern.
+    """Einmal täglich ein konsistentes lokales DB-Backup ziehen.
     Bei einem Problem (Integritätscheck != ok oder Fehler) eine Telegram-Warnung
     schicken — eine stille DB-Korruption soll nicht unbemerkt bleiben."""
     global _last_backup_date
@@ -200,10 +184,10 @@ def _maybe_run_daily_backup():
     if _last_backup_date == today:
         return
     _last_backup_date = today
-    r = _backup_and_offsite("💾 Tägliches DB-Backup")
+    r = db.backup_db(config.DB_PATH)
     if r["ok"]:
         print(f"DB-Backup ok: {r['file']} ({r['size']} B), integrity={r['integrity']}, "
-              f"{r['kept']} behalten, off-site={r['uploaded']}.")
+              f"{r['kept']} behalten.")
     else:
         problem = r.get("error") or f"Integritätscheck: {r['integrity']}"
         print(f"DB-Backup-Problem: {problem}")
@@ -802,14 +786,13 @@ def handle_command(chat_id: str, text: str):
     # --- /backup ---
     elif cmd == "backup":
         _reply(chat_id, "💾 Erstelle DB-Backup…")
-        r = _backup_and_offsite("💾 DB-Backup (manuell)")
+        r = db.backup_db(config.DB_PATH)
         if r["ok"]:
             kb = r["size"] / 1024
-            offsite = "als Dokument hochgeladen" if r["uploaded"] else "Upload fehlgeschlagen"
             _reply(
                 chat_id,
                 f"✅ Backup erstellt ({kb:.0f} KB, Integrität: {r['integrity']}).\n"
-                f"<code>{r['file']}</code>\n{r['kept']} Backups aufbewahrt · off-site: {offsite}.",
+                f"<code>{r['file']}</code>\n{r['kept']} Backups aufbewahrt (lokal).",
             )
         else:
             problem = r.get("error") or f"Integritätscheck: {r['integrity']}"
