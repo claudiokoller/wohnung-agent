@@ -47,8 +47,8 @@ _AUTH_ALERT_INTERVAL_H = 6                  # Login-Warnung alle X Stunden wiede
 # Stiller Parser-/Template-Bruch: Mails kommen an, aber 0 Inserate geparst.
 _zero_parse_streak = 0
 _last_parse_alert: datetime | None = None
-_PARSE_ALERT_INTERVAL_H = 6
-_PARSE_STREAK_THRESHOLD = 3                 # erst nach X solchen Durchläufen warnen
+_PARSE_ALERT_INTERVAL_H = 12
+_PARSE_STREAK_THRESHOLD = 5                 # erst nach X solchen Durchläufen warnen
 
 
 def _is_auth_error(e: Exception) -> bool:
