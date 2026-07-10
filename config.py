@@ -50,8 +50,11 @@ OAUTH_CLIENT_ID     = os.getenv("WOHNUNGS_OAUTH_CLIENT_ID", "")
 OAUTH_CLIENT_SECRET = os.getenv("WOHNUNGS_OAUTH_CLIENT_SECRET", "")
 OAUTH_REFRESH_TOKEN = os.getenv("WOHNUNGS_OAUTH_REFRESH_TOKEN", "")
 
-# False = verarbeitete Mails als gelesen markieren (verhindert Doppel-
-#         verarbeitung). True = Mails unangetastet lassen (nur Dedup via DB).
+# False = verarbeitete Mails LÖSCHEN (verhindert Doppelverarbeitung UND hält das
+#         Postfach unter der Provider-Quota — läuft es voll, weist der Provider
+#         eingehende Mails ab und der Bot bekommt nichts mehr).
+# True  = Mails unangetastet lassen (nur Dedup via DB; zum Debuggen, Postfach
+#         läuft dann irgendwann voll).
 IMAP_KEEP_UNREAD = False
 
 # Tracking-Redirects in den Mails auflösen, um die echte Portal-Listing-ID

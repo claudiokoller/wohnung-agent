@@ -40,9 +40,9 @@ from sources import Listing
 # Parser-/Template-Bruch zu erkennen: Mails kommen an, aber 0 Inserate geparst).
 LAST_RUN = {"fetched": 0, "parsed": 0}
 
-# Nach so vielen 0-Treffer-Durchläufen wird eine Mail aufgegeben (als gelesen
-# markiert). Schützt echte Inserat-Mails über ein Reparatur-Fenster hinweg,
-# ohne Bestätigungs-/Nicht-Inserat-Mails endlos neu zu verarbeiten.
+# Nach so vielen 0-Treffer-Durchläufen wird eine Mail aufgegeben (gelöscht).
+# Schützt echte Inserat-Mails über ein Reparatur-Fenster hinweg, ohne
+# Bestätigungs-/Nicht-Inserat-Mails endlos neu zu verarbeiten.
 _MAX_PARSE_ATTEMPTS = 5
 
 # Transiente IMAP-Fehler (mailbox.org/Heinlein drosselt zu schnelle Logins:
@@ -476,19 +476,33 @@ def fetch_email(search, cfg):
         # mind. eine Mail lieferte Inserate -> Parser/Template sind gesund
         batch_ok = any(ml for _, _, ml in per_uid)
 
-        # 2. Seen-Flags defensiv setzen
+        # 2. Verarbeitete Mails aufräumen: LÖSCHEN, nicht nur als gelesen markieren.
+        #    Früher wurden erledigte Mails nur mit \Seen geflaggt und blieben liegen —
+        #    das Postfach wuchs unbegrenzt und lief irgendwann in die Provider-Quota
+        #    (mailbox.org: 100 MB). Ist die voll, weist der Provider EINGEHENDE Mails
+        #    ab → der Bot bekommt gar nichts mehr und der Feed versiegt still.
+        #    Deshalb jetzt: fertig verarbeitete Alert-Mails per \Deleted + EXPUNGE
+        #    entfernen. Die Inseratsdaten liegen bereits in der DB.
         if not cfg.IMAP_KEEP_UNREAD:
+            to_delete = []
             for uid, msgid, ml in per_uid:
                 if ml or batch_ok:
                     # geparst, ODER Parser gesund -> diese 0-Mail ist ein echtes
                     # Nicht-Inserat (z.B. Bestätigungsmail): erledigt.
-                    mark = True
+                    done = True
                 else:
                     # ganze Charge leer -> evtl. Parser-/Netz-Problem. Mail noch
-                    # ein paar Durchläufe ungelesen lassen (Recovery), dann aufgeben.
-                    mark = db.bump_email_attempt(cfg.DB_PATH, msgid) >= _MAX_PARSE_ATTEMPTS
-                if mark:
-                    M.uid("store", uid, "+FLAGS", "(\\Seen)")
+                    # ein paar Durchläufe behalten (Recovery), dann aufgeben.
+                    done = db.bump_email_attempt(cfg.DB_PATH, msgid) >= _MAX_PARSE_ATTEMPTS
+                if done:
+                    to_delete.append(uid)
+            if to_delete:
+                # In Batches flaggen (sehr lange UID-Listen sprengen sonst den
+                # Command), dann einmal expungen -> gibt den Speicher frei.
+                for i in range(0, len(to_delete), 200):
+                    batch = b",".join(to_delete[i:i + 200])
+                    M.uid("store", batch, "+FLAGS", "(\\Deleted)")
+                M.expunge()
         M.close()
     finally:
         M.logout()
