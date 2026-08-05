@@ -44,6 +44,15 @@ _last_heartbeat_sent: datetime | None = None
 _last_auth_alert: datetime | None = None   # letzte IMAP-Login-Warnung
 _AUTH_ALERT_INTERVAL_H = 6                  # Login-Warnung alle X Stunden wiederholen
 
+# Ein «transienter» Fehler, der nicht mehr weggeht, ist in Wahrheit ein
+# Dauerausfall. mailbox.org meldet AUCH einen endgültig abgelehnten Login
+# generisch als «[UNAVAILABLE] Temporary authentication failure» — der lief
+# sonst unbegrenzt in die Retry-Schleife und löste nie einen Alarm aus.
+_transient_streak: dict[str, int] = {}
+_TRANSIENT_STREAK_THRESHOLD = 8            # ~2h bei 15-Min-Takt
+_last_stuck_alert: datetime | None = None
+_STUCK_ALERT_INTERVAL_H = 6
+
 # Stiller Parser-/Template-Bruch: Mails kommen an, aber 0 Inserate geparst.
 _zero_parse_streak = 0
 _last_parse_alert: datetime | None = None
@@ -64,8 +73,38 @@ def _is_auth_error(e: Exception) -> bool:
 
 def _auth_ok():
     """Login hat geklappt -> Warn-Zustand zurücksetzen."""
-    global _last_auth_alert
+    global _last_auth_alert, _last_stuck_alert
     _last_auth_alert = None
+    _last_stuck_alert = None
+
+
+def _stuck_alert(name: str, err, streak: int):
+    """Eskaliert eine Quelle, die zwar «transiente» Fehler wirft, das aber seit
+    vielen Durchläufen am Stück. Nach _TRANSIENT_STREAK_THRESHOLD Läufen ist es
+    kein Blip mehr — ohne diese Eskalation bleibt ein toter Login nur im
+    journalctl stehen und die Gruppe sieht bloss «keine Inserate»."""
+    global _last_stuck_alert
+    now = datetime.now(timezone.utc)
+    if (_last_stuck_alert
+            and (now - _last_stuck_alert).total_seconds() < _STUCK_ALERT_INTERVAL_H * 3600):
+        return
+    hours = streak * config.POLL_INTERVAL_MIN / 60
+    notify.send_system(
+        config.TELEGRAM_BOT_TOKEN,
+        config.TELEGRAM_CHAT_IDS,
+        f"🔴 <b>Quelle {name} hängt</b> — {streak} Durchläufe in Folge "
+        f"fehlgeschlagen (~{hours:.0f}h). Es kommen KEINE Inserate mehr an.\n\n"
+        "Der Fehler sieht vorübergehend aus, hält aber an. Häufigste Ursache: "
+        "das Mail-Konto lehnt den Login ab (Passwort geändert/widerrufen oder "
+        "Konto gesperrt) — mailbox.org meldet das als «Temporary authentication "
+        "failure».\n\n"
+        "Prüfen: Login auf office.mailbox.org, danach ggf. "
+        "<code>WOHNUNGS_IMAP_PASS</code> in der <code>.env</code> auf dem VPS "
+        "korrigieren und <code>systemctl restart wohnungs-bot wohnungs-bot-cmd</code>.\n\n"
+        f"Fehler: {err}",
+    )
+    _last_stuck_alert = now
+    print(f"Dauerausfall-Warnung gesendet ({name}, streak={streak}).")
 
 
 def _auth_alert(err):
@@ -202,6 +241,7 @@ def run_once(seed=False):
         try:
             listings = src(search, config)
             _source_failures[name] = 0  # Fehler-Zähler zurücksetzen
+            _transient_streak[name] = 0 # Dauerausfall-Streak zurücksetzen
             successful_srcs += 1        # Quelle hat funktioniert (auch 0 Treffer = OK)
             _auth_ok()                  # Login klappt wieder -> Warn-Zustand löschen
             _note_parser_health()       # stillen Parser-/Template-Bruch erkennen
@@ -209,9 +249,12 @@ def run_once(seed=False):
             print(f"Quelle {name} fehlgeschlagen: {e}")
             if email_source.is_transient_error(e):
                 # Vorübergehend (Drossel/Netz). _connect hat bereits mit Backoff
-                # wiederholt; kein Alarm, kein Hard-Fail-Zähler — nächster
-                # Durchlauf greift erneut. Der 24h-Heartbeat fängt einen echten
-                # Dauerausfall trotzdem ab.
+                # wiederholt; kein Sofort-Alarm, kein Hard-Fail-Zähler — nächster
+                # Durchlauf greift erneut. Hält es aber über viele Durchläufe an,
+                # ist es kein Blip mehr, sondern ein Dauerausfall -> eskalieren.
+                _transient_streak[name] = _transient_streak.get(name, 0) + 1
+                if _transient_streak[name] >= _TRANSIENT_STREAK_THRESHOLD:
+                    _stuck_alert(name, e, _transient_streak[name])
                 continue
             if _is_auth_error(e):
                 _auth_alert(e)          # tote Zugangsdaten sofort + wiederholt melden

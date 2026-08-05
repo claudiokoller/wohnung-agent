@@ -356,6 +356,65 @@ def test_mark_listing():
 
 
 # ---------------------------------------------------------------------------
+# Dauerausfall-Eskalation (main.py)
+# ---------------------------------------------------------------------------
+
+def _stuck_setup(monkey_sent):
+    """Setzt main.py für einen Eskalations-Test auf und fängt Telegram ab."""
+    import main
+    import notify
+    main._last_stuck_alert = None
+    main._transient_streak.clear()
+    notify.send_system = lambda *a, **kw: monkey_sent.append(a)
+    return main
+
+
+def test_mailboxorg_authfehler_gilt_als_transient():
+    """Dokumentiert die Ursache des 14-Tage-Ausfalls: mailbox.org meldet auch
+    einen endgültig toten Login generisch als «Temporary authentication
+    failure» — er wird deshalb als transient eingestuft und läuft NICHT in
+    _is_auth_error. Die Eskalation über die Streak fängt genau das ab."""
+    import email_source
+    import main
+
+    err = Exception("[UNAVAILABLE] Temporary authentication failure. [director-03]")
+    assert email_source.is_transient_error(err) is True
+    assert main._is_auth_error(err) is False
+
+
+def test_dauerausfall_eskaliert_erst_ab_schwelle():
+    sent = []
+    main = _stuck_setup(sent)
+    err = Exception("[UNAVAILABLE] Temporary authentication failure.")
+
+    # Ab der Schwelle: genau ein Alarm
+    main._stuck_alert("fetch_email", err, main._TRANSIENT_STREAK_THRESHOLD)
+    assert len(sent) == 1
+    assert "hängt" in sent[0][2]
+
+    # Direkt danach erneut: gedrosselt, kein zweiter Alarm
+    main._stuck_alert("fetch_email", err, main._TRANSIENT_STREAK_THRESHOLD + 1)
+    assert len(sent) == 1
+
+
+def test_erfolgreicher_login_loescht_warnzustand():
+    sent = []
+    main = _stuck_setup(sent)
+    err = Exception("[UNAVAILABLE] Temporary authentication failure.")
+
+    main._stuck_alert("fetch_email", err, main._TRANSIENT_STREAK_THRESHOLD)
+    assert len(sent) == 1
+    assert main._last_stuck_alert is not None
+
+    main._auth_ok()                      # Quelle lief wieder durch
+    assert main._last_stuck_alert is None
+
+    # Nach Erholung darf ein neuer Ausfall sofort wieder melden
+    main._stuck_alert("fetch_email", err, main._TRANSIENT_STREAK_THRESHOLD)
+    assert len(sent) == 2
+
+
+# ---------------------------------------------------------------------------
 # Einfacher Test-Runner (ohne pytest)
 # ---------------------------------------------------------------------------
 
