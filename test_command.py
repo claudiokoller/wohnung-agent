@@ -415,6 +415,153 @@ def test_erfolgreicher_login_loescht_warnzustand():
 
 
 # ---------------------------------------------------------------------------
+# Tests: Überwachung (Mail-Eingang pro Portal, Heartbeat, Quellen-Wächter)
+# ---------------------------------------------------------------------------
+
+def _monitor_db():
+    """Wegwerf-DB mit Eingangs-Log: newhome frisch, Flatfox seit 5 Tagen still."""
+    from datetime import datetime, timedelta, timezone
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+        path = f.name
+    db.init(path)
+    now = datetime.now(timezone.utc)
+    db.log_mail(path, "newhome", 3, (now - timedelta(hours=2)).isoformat())
+    db.log_mail(path, "newhome", 1, (now - timedelta(hours=30)).isoformat())
+    db.log_mail(path, "Flatfox", 2, (now - timedelta(days=5)).isoformat())
+    return path
+
+
+def test_mail_log_zaehlt_pro_portal_und_fenster():
+    path = _monitor_db()
+    try:
+        stats = db.mail_source_stats(path, window_h=24)
+        assert stats["newhome"]["recent"] == 3      # nur die Mail von vor 2h
+        assert stats["newhome"]["total"] == 4       # inkl. der von vor 30h
+        assert stats["Flatfox"]["recent"] == 0
+        assert "Homegate" not in stats              # nie geliefert -> kein Eintrag
+    finally:
+        os.unlink(path)
+
+
+def test_last_mail_at_nimmt_juengste_ueber_alle_portale():
+    path = _monitor_db()
+    try:
+        assert db.last_mail_at(path) == db.mail_source_stats(path)["newhome"]["last"]
+    finally:
+        os.unlink(path)
+
+
+def test_prune_mail_log_raeumt_alte_eintraege():
+    path = _monitor_db()
+    try:
+        assert db.prune_mail_log(path, days=3) == 1   # nur der Flatfox-Eintrag
+        assert "Flatfox" not in db.mail_source_stats(path)
+    finally:
+        os.unlink(path)
+
+
+def test_heartbeat_schweigt_bei_frischem_maileingang():
+    """Kernregression: der Heartbeat hing an last_activity, das bei JEDEM
+    erfolgreichen Poll neu gesetzt wurde — er schlug deshalb auch dann nicht
+    an, wenn wochenlang keine Mail mehr ankam. Jetzt zählt der Mail-Eingang."""
+    import config, main, notify
+    path = _monitor_db()
+    orig_db, orig_send = config.DB_PATH, notify.send_system
+    sent = []
+    try:
+        config.DB_PATH = path
+        notify.send_system = lambda *a, **k: sent.append(a[-1])
+        main._last_heartbeat_sent = None
+        main._check_heartbeat()
+        assert sent == []
+    finally:
+        config.DB_PATH, notify.send_system = orig_db, orig_send
+        os.unlink(path)
+
+
+def test_heartbeat_meldet_wenn_gar_keine_mail_mehr_kommt():
+    from datetime import datetime, timedelta, timezone
+    import config, main, notify
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+        path = f.name
+    orig_db, orig_send = config.DB_PATH, notify.send_system
+    sent = []
+    try:
+        db.init(path)
+        config.DB_PATH = path
+        notify.send_system = lambda *a, **k: sent.append(a[-1])
+        # Leeres Log + alter Referenzzeitpunkt = seit Tagen kein Eingang
+        db.set_meta(path, "monitor_since",
+                    (datetime.now(timezone.utc) - timedelta(days=6)).isoformat())
+        main._last_heartbeat_sent = None
+        main._check_heartbeat()
+        assert len(sent) == 1
+        assert "Kein Mail-Eingang" in sent[0]
+    finally:
+        config.DB_PATH, notify.send_system = orig_db, orig_send
+        os.unlink(path)
+
+
+def test_quellen_waechter_meldet_nur_die_stumme_quelle():
+    import config, main, notify
+    path = _monitor_db()
+    orig_db, orig_send = config.DB_PATH, notify.send_system
+    sent = []
+    try:
+        config.DB_PATH = path
+        notify.send_system = lambda *a, **k: sent.append(a[-1])
+        main._last_source_alert = None
+        main._check_sources()
+        assert len(sent) == 1
+        assert "Flatfox" in sent[0]
+        assert "newhome" not in sent[0]   # liefert -> kein Alarm
+    finally:
+        config.DB_PATH, notify.send_system = orig_db, orig_send
+        os.unlink(path)
+
+
+def test_quellen_waechter_schweigt_wenn_alles_still_ist():
+    """Sind ALLE Quellen stumm, ist das der Heartbeat-Fall — der Quellen-
+    Wächter darf dann nicht zusätzlich dieselbe Lage melden."""
+    from datetime import datetime, timedelta, timezone
+    import config, main, notify
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+        path = f.name
+    orig_db, orig_send = config.DB_PATH, notify.send_system
+    sent = []
+    try:
+        db.init(path)
+        config.DB_PATH = path
+        notify.send_system = lambda *a, **k: sent.append(a[-1])
+        db.set_meta(path, "monitor_since",
+                    (datetime.now(timezone.utc) - timedelta(days=6)).isoformat())
+        main._last_source_alert = None
+        main._check_sources()
+        assert sent == []
+    finally:
+        config.DB_PATH, notify.send_system = orig_db, orig_send
+        os.unlink(path)
+
+
+def test_sources_lines_markiert_jede_quelle():
+    import config, command, email_source
+    path = _monitor_db()
+    orig_db = config.DB_PATH
+    try:
+        config.DB_PATH = path
+        lines = command._sources_lines()
+        assert len(lines) == len(email_source.MONITORED_PORTALS)
+        text = "\n".join(lines)
+        assert "✅ newhome" in text        # frisch
+        assert "🔴 Flatfox" in text        # 5 Tage still
+        assert "Homegate — noch nie" in text
+        assert "ImmoStreet" not in text    # kein Abo -> nicht überwacht
+    finally:
+        config.DB_PATH = orig_db
+        os.unlink(path)
+
+
+# ---------------------------------------------------------------------------
 # Einfacher Test-Runner (ohne pytest)
 # ---------------------------------------------------------------------------
 

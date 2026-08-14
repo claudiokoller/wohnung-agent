@@ -38,7 +38,7 @@ from sources import Listing
 
 # Diagnose des letzten fetch_email-Laufs (von main.py gelesen, um einen stillen
 # Parser-/Template-Bruch zu erkennen: Mails kommen an, aber 0 Inserate geparst).
-LAST_RUN = {"fetched": 0, "parsed": 0}
+LAST_RUN = {"fetched": 0, "parsed": 0, "per_source": {}}
 
 # Nach so vielen 0-Treffer-Durchläufen wird eine Mail aufgegeben (gelöscht).
 # Schützt echte Inserat-Mails über ein Reparatur-Fenster hinweg, ohne
@@ -59,14 +59,24 @@ def is_transient_error(e) -> bool:
     """True bei vorübergehendem IMAP-/Netzfehler (Retry sinnvoll, kein Alarm)."""
     return bool(_TRANSIENT_RE.search(str(e)))
 
+# Absender-Domain -> Portalname. Die Zuordnung erlaubt es, den Mail-Eingang
+# pro Quelle zu protokollieren; nur so fällt ein einzelnes totes Suchabo auf,
+# während die übrigen Portale weiterliefern.
+SENDER_PORTALS = {
+    "homegate.ch":    "Homegate",
+    "immoscout24.ch": "ImmoScout24",
+    "immostreet.ch":  "ImmoStreet",
+    "newhome.ch":     "newhome",
+    "flatfox.ch":     "Flatfox",
+}
+
 # Absender-Domains der Portal-Alert-Mails
-ALERT_SENDER_DOMAINS = [
-    "homegate.ch",
-    "immoscout24.ch",
-    "immostreet.ch",
-    "newhome.ch",
-    "flatfox.ch",
-]
+ALERT_SENDER_DOMAINS = list(SENDER_PORTALS)
+
+# Portale, für die tatsächlich ein Suchabo besteht und deren Stille daher ein
+# Alarm ist. Bewusst enger als SENDER_PORTALS: ImmoStreet wird als Absender
+# noch akzeptiert, ohne dass sein Fehlen als Ausfall gemeldet wird.
+MONITORED_PORTALS = ("Homegate", "ImmoScout24", "newhome", "Flatfox")
 
 # Erkennung Portal + Listing-ID aus der Ziel-URL (nach Redirect-Auflösung)
 LISTING_PATTERNS = {
@@ -186,14 +196,29 @@ def _connect(cfg, attempts: int = 3):
     raise last   # nicht erreichbar, aber explizit
 
 
+def _alert_uids_by_portal(M, unseen_only=True) -> dict[str, list]:
+    """UIDs der Alert-Mails, gruppiert nach Portal. Eine UID wird nur einem
+    Portal zugeordnet (erster Treffer gewinnt), damit die Eingangszählung
+    keine Mail doppelt wertet."""
+    out: dict[str, list] = {}
+    taken: set = set()
+    criteria = ["UNSEEN", "FROM"] if unseen_only else ["FROM"]
+    for dom, portal in SENDER_PORTALS.items():
+        typ, data = M.uid("search", None, *criteria, dom)
+        if typ != "OK" or not data or not data[0]:
+            continue
+        fresh = [u for u in data[0].split() if u not in taken]
+        taken.update(fresh)
+        if fresh:
+            out.setdefault(portal, []).extend(fresh)
+    return out
+
+
 def _alert_uids(M, unseen_only=True):
     uids = []
-    criteria = ["UNSEEN", "FROM"] if unseen_only else ["FROM"]
-    for dom in ALERT_SENDER_DOMAINS:
-        typ, data = M.uid("search", None, *criteria, dom)
-        if typ == "OK" and data and data[0]:
-            uids.extend(data[0].split())
-    return list(dict.fromkeys(uids))
+    for portal_uids in _alert_uids_by_portal(M, unseen_only).values():
+        uids.extend(portal_uids)
+    return uids
 
 
 # --- Parsing ---------------------------------------------------------------
@@ -461,17 +486,20 @@ def fetch_email(search, cfg):
         #    markiert werden, entscheiden wir DANACH — so geht bei einem Template-
         #    Bruch (0 Inserate aus allen Mails) nichts unwiederbringlich verloren.
         per_uid = []   # (uid, msgid, mail_listings)
-        for uid in _alert_uids(M):
-            typ, data = M.uid("fetch", uid, "(RFC822)")
-            if typ != "OK" or not data or not data[0]:
-                continue
-            fetched += 1
-            msg = email.message_from_bytes(data[0][1])
-            msgid = (msg.get("Message-ID") or "").strip()
-            html = _html_body(msg)
-            mail_listings = _parse_html(html, cfg.RESOLVE_TRACKING_LINKS) if html else []
-            per_uid.append((uid, msgid, mail_listings))
-            listings.extend(mail_listings)
+        per_source: dict[str, int] = {}
+        for portal, uids in _alert_uids_by_portal(M).items():
+            for uid in uids:
+                typ, data = M.uid("fetch", uid, "(RFC822)")
+                if typ != "OK" or not data or not data[0]:
+                    continue
+                fetched += 1
+                per_source[portal] = per_source.get(portal, 0) + 1
+                msg = email.message_from_bytes(data[0][1])
+                msgid = (msg.get("Message-ID") or "").strip()
+                html = _html_body(msg)
+                mail_listings = _parse_html(html, cfg.RESOLVE_TRACKING_LINKS) if html else []
+                per_uid.append((uid, msgid, mail_listings))
+                listings.extend(mail_listings)
 
         # mind. eine Mail lieferte Inserate -> Parser/Template sind gesund
         batch_ok = any(ml for _, _, ml in per_uid)
@@ -508,6 +536,7 @@ def fetch_email(search, cfg):
         M.logout()
     LAST_RUN["fetched"] = fetched
     LAST_RUN["parsed"] = len(listings)
+    LAST_RUN["per_source"] = per_source
     return listings
 
 

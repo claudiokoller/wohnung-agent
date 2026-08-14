@@ -5,6 +5,7 @@ Tabellen:
   seen          Dedup-Tabelle (bleibt rückwärtskompatibel)
   listings      Erweiterte Inserat-Daten (für /info, /merk, /weg)
   filter_state  Einzeilig: aktueller Filter-State (überlebt Neustarts)
+  mail_log      Eingangs-Log pro Portal (Grundlage der Stille-Überwachung)
 
 Migration: init_filter_state() seedet filter_state beim ersten Start
 aus config.SEARCH. Danach ist die DB führend.
@@ -14,7 +15,7 @@ import os
 import re
 import sqlite3
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 
 @contextmanager
@@ -109,6 +110,23 @@ def init(path):
             """
         )
 
+        # Eingangs-Log pro Portal: welche Quelle hat wann eine Alert-Mail
+        # geliefert. Grundlage für die Stille-Überwachung — ein einzelnes
+        # totes Suchabo fällt sonst nicht auf, solange die anderen liefern
+        # (genau so blieben Homegate/ImmoScout24 nach dem Provider-Wechsel
+        # wochenlang unbemerkt stumm).
+        con.execute(
+            """
+            CREATE TABLE IF NOT EXISTS mail_log (
+                id     INTEGER PRIMARY KEY AUTOINCREMENT,
+                portal TEXT NOT NULL,
+                ts     TEXT NOT NULL,
+                mails  INTEGER DEFAULT 1
+            )
+            """
+        )
+        con.execute("CREATE INDEX IF NOT EXISTS idx_mail_log_ts ON mail_log (ts)")
+
         # Migrationen für bestehende DBs
         for col_sql in [
             "ALTER TABLE filter_state ADD COLUMN last_activity TEXT",
@@ -140,6 +158,63 @@ def get_meta(path, key: str, default=None):
     with _conn(path) as con:
         row = con.execute("SELECT value FROM meta WHERE key = ?", (key,)).fetchone()
         return row[0] if row else default
+
+
+# --- Eingangs-Log pro Portal ------------------------------------------------
+
+def log_mail(path, portal: str, mails: int = 1, ts: str | None = None) -> None:
+    """Vermerkt, dass von `portal` Alert-Mail(s) eingegangen sind."""
+    if mails <= 0:
+        return
+    stamp = ts or datetime.now(timezone.utc).isoformat()
+    with _conn(path) as con:
+        con.execute(
+            "INSERT INTO mail_log (portal, ts, mails) VALUES (?, ?, ?)",
+            (portal, stamp, mails),
+        )
+
+
+def mail_source_stats(path, window_h: int = 24) -> dict[str, dict]:
+    """Pro Portal: Zeitpunkt der letzten Alert-Mail und Anzahl im Zeitfenster.
+
+    Liefert nur Portale, die überhaupt schon einmal geliefert haben — wer die
+    Soll-Liste braucht (Stille-Überwachung), ergänzt fehlende selbst."""
+    cutoff = (datetime.now(timezone.utc) - timedelta(hours=window_h)).isoformat()
+    out: dict[str, dict] = {}
+    with _conn(path) as con:
+        for portal, last, total in con.execute(
+            "SELECT portal, MAX(ts), SUM(mails) FROM mail_log GROUP BY portal"
+        ):
+            out[portal] = {"last": last, "total": total or 0, "recent": 0}
+        for portal, recent in con.execute(
+            "SELECT portal, SUM(mails) FROM mail_log WHERE ts >= ? GROUP BY portal",
+            (cutoff,),
+        ):
+            if portal in out:
+                out[portal]["recent"] = recent or 0
+    return out
+
+
+def last_mail_at(path) -> str | None:
+    """Zeitpunkt der letzten Alert-Mail über alle Portale hinweg."""
+    with _conn(path) as con:
+        row = con.execute("SELECT MAX(ts) FROM mail_log").fetchone()
+        return row[0] if row and row[0] else None
+
+
+def get_last_listing_at(path) -> str | None:
+    """Zeitpunkt des zuletzt eingetroffenen Inserats (unabhängig vom Filter)."""
+    with _conn(path) as con:
+        row = con.execute("SELECT MAX(first_seen) FROM listings").fetchone()
+        return row[0] if row and row[0] else None
+
+
+def prune_mail_log(path, days: int = 90) -> int:
+    """Alte Einträge wegräumen — das Log ist Überwachung, kein Archiv."""
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    with _conn(path) as con:
+        cur = con.execute("DELETE FROM mail_log WHERE ts < ?", (cutoff,))
+        return cur.rowcount or 0
 
 
 # --- Parse-Versuche pro Mail -----------------------------------------------

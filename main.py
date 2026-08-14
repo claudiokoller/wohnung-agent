@@ -39,8 +39,15 @@ SOURCES = [fetch_email]
 # Fehler-Tracking: wie oft hat eine Quelle hintereinander versagt?
 _source_failures: dict[str, int] = {}
 _MAX_FAILURES = 3          # ab hier Telegram-Warnung
-_HEARTBEAT_HOURS = 24      # nach X Stunden ohne Aktivität warnen
+_HEARTBEAT_HOURS = 24      # nach X Stunden ohne eingehende Portal-Mail warnen
 _last_heartbeat_sent: datetime | None = None
+
+# Einzelne verstummte Quelle: liefert ein Portal tagelang nichts, während die
+# anderen laufen, ist sein Suchabo tot (abgelaufen, nach Bounces deaktiviert,
+# nach Adresswechsel nie bestätigt). Der globale Heartbeat sieht das nicht.
+_SOURCE_SILENT_H = 72
+_SOURCE_ALERT_INTERVAL_H = 24
+_last_source_alert: datetime | None = None
 _last_auth_alert: datetime | None = None   # letzte IMAP-Login-Warnung
 _AUTH_ALERT_INTERVAL_H = 6                  # Login-Warnung alle X Stunden wiederholen
 
@@ -175,16 +182,34 @@ def _build_search(filter_state: dict) -> dict:
     }
 
 
+def _parse_ts(iso: str) -> datetime:
+    dt = datetime.fromisoformat(iso)
+    return dt.replace(tzinfo=timezone.utc) if dt.tzinfo is None else dt
+
+
+def _monitor_since() -> str:
+    """Referenzzeitpunkt, ab dem Stille überhaupt zählt. Ohne ihn bliebe eine
+    frische Installation (leeres mail_log) für immer alarmfrei — genau der Fall
+    «Adresse gewechselt, kein Abo bestätigt, nie eine Mail gesehen»."""
+    since = db.get_meta(config.DB_PATH, "monitor_since")
+    if not since:
+        since = datetime.now(timezone.utc).isoformat()
+        db.set_meta(config.DB_PATH, "monitor_since", since)
+    return since
+
+
 def _check_heartbeat():
-    """Warnt in der Gruppe wenn 24h kein einziges Inserat durch die Pipeline kam."""
+    """Warnt, wenn seit 24h keine einzige Portal-Mail mehr eingegangen ist.
+
+    Bezugsgröße ist bewusst der Mail-EINGANG, nicht `last_activity`: letzteres
+    wird bei jedem technisch erfolgreichen Poll neu gesetzt und ist damit auch
+    dann frisch, wenn seit Wochen nichts mehr ankommt. Ein toter Mail-Zufluss
+    blieb so wochenlang unbemerkt."""
     global _last_heartbeat_sent
-    last_str = db.get_last_activity(config.DB_PATH)
-    if not last_str:
-        return  # noch nie aktiv, kein Alarm
     try:
-        last_dt = datetime.fromisoformat(last_str).replace(tzinfo=timezone.utc)
-        now     = datetime.now(timezone.utc)
-        hours   = (now - last_dt).total_seconds() / 3600
+        last_str = db.last_mail_at(config.DB_PATH) or _monitor_since()
+        now      = datetime.now(timezone.utc)
+        hours    = (now - _parse_ts(last_str)).total_seconds() / 3600
         if hours < _HEARTBEAT_HOURS:
             return
         # Nur einmal pro 24h warnen, nicht bei jedem 15-Min-Durchlauf
@@ -193,13 +218,63 @@ def _check_heartbeat():
         notify.send_system(
             config.TELEGRAM_BOT_TOKEN,
             config.TELEGRAM_CHAT_IDS,
-            f"⚠️ Heartbeat: seit {hours:.0f}h kein einziges Inserat in der Pipeline.\n"
-            f"IMAP-Verbindung oder Portal-Abos prüfen.",
+            f"🔴 <b>Kein Mail-Eingang seit {hours:.0f}h</b> — es kommt von KEINEM "
+            f"Portal mehr etwas an.\n\n"
+            "Der Bot selbst läuft (Login und Poll sind in Ordnung), das Problem "
+            "liegt davor. Prüfen:\n"
+            "• Sind die Suchabos bei den Portalen noch aktiv?\n"
+            "• Kam eine Bestätigungsmail, die nie geklickt wurde?\n"
+            "• Postfach voll oder Konto gesperrt?\n\n"
+            "Details: <code>/health</code>",
         )
         _last_heartbeat_sent = now
-        print(f"Heartbeat-Warnung gesendet ({hours:.0f}h ohne Aktivität).")
+        print(f"Heartbeat-Warnung gesendet ({hours:.0f}h ohne Mail-Eingang).")
     except Exception as e:
         print(f"Heartbeat-Check fehlgeschlagen: {e}")
+
+
+def _check_sources():
+    """Meldet einzelne Portale, die seit Tagen keine Mail mehr geliefert haben.
+
+    Läuft absichtlich neben dem Heartbeat: solange auch nur ein Portal sendet,
+    schweigt der Heartbeat — ein einzelnes totes Suchabo fiele sonst nie auf."""
+    global _last_source_alert
+    try:
+        now   = datetime.now(timezone.utc)
+        stats = db.mail_source_stats(config.DB_PATH)
+        since = _monitor_since()
+        silent = []
+        for portal in email_source.MONITORED_PORTALS:
+            last = (stats.get(portal) or {}).get("last") or since
+            hours = (now - _parse_ts(last)).total_seconds() / 3600
+            if hours >= _SOURCE_SILENT_H:
+                never = portal not in stats
+                silent.append((portal, hours, never))
+        if not silent:
+            return
+        # Alle stumm -> das ist der Heartbeat-Fall, nicht der Einzelquellen-Fall
+        if len(silent) == len(email_source.MONITORED_PORTALS):
+            return
+        if (_last_source_alert
+                and (now - _last_source_alert).total_seconds() < _SOURCE_ALERT_INTERVAL_H * 3600):
+            return
+        lines = []
+        for portal, hours, never in sorted(silent, key=lambda s: -s[1]):
+            wann = "noch nie" if never else f"seit {hours / 24:.0f}d"
+            lines.append(f"• <b>{portal}</b> — {wann} keine Mail")
+        notify.send_system(
+            config.TELEGRAM_BOT_TOKEN,
+            config.TELEGRAM_CHAT_IDS,
+            "⚠️ <b>Quelle(n) verstummt</b> — andere Portale liefern weiterhin:\n\n"
+            + "\n".join(lines)
+            + "\n\nWahrscheinlich ist das Suchabo dort nicht mehr aktiv "
+              "(abgelaufen, nach Bounces deaktiviert oder nie bestätigt). "
+              "Im Portal prüfen und ggf. neu anlegen.",
+        )
+        _last_source_alert = now
+        print(f"Quellen-Warnung gesendet: {[s[0] for s in silent]}")
+    except Exception as e:
+        print(f"Quellen-Check fehlgeschlagen: {e}")
 
 
 def _resend_pending() -> int:
@@ -307,9 +382,16 @@ def run_once(seed=False):
         db.set_meta(config.DB_PATH, "last_poll", datetime.now(timezone.utc).isoformat())
         db.set_meta(config.DB_PATH, "last_fetched", email_source.LAST_RUN.get("fetched", 0))
         db.set_meta(config.DB_PATH, "last_parsed", email_source.LAST_RUN.get("parsed", 0))
+        _monitor_since()   # Referenzzeitpunkt beim ersten Lauf festhalten
+
+        # Mail-Eingang pro Portal protokollieren — Grundlage für Heartbeat,
+        # Quellen-Wächter und den täglichen Bericht.
+        for portal, cnt in (email_source.LAST_RUN.get("per_source") or {}).items():
+            db.log_mail(config.DB_PATH, portal, cnt)
 
     if not seed:
         _check_heartbeat()
+        _check_sources()
 
     if seed:
         print(f"Seed fertig. {db.count(config.DB_PATH)} Inserate als gesehen markiert.")

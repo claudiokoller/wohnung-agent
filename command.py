@@ -48,6 +48,7 @@ import requests
 
 import config
 import db
+import email_source
 import notify
 from plz_lookup import find_gemeinde_name, find_plz, group_by_gemeinde, plz_to_gemeinde
 from application import build_blank_letter, build_letter
@@ -69,6 +70,12 @@ _last_summary_date: dt.date | None = None
 # DB-Backup: einmal täglich um 04:00 Zürich-Zeit (ruhige Stunde)
 _BACKUP_HOUR = 4
 _last_backup_date: dt.date | None = None
+
+# Überwachungsbericht: einmal täglich um 08:00 Zürich-Zeit. Zeigt schwarz auf
+# weiss, ob überhaupt noch etwas ankommt — ohne ihn sieht ein leerer Feed
+# genauso aus wie ein toter Zufluss.
+_MONITOR_HOUR = 8
+_last_monitor_date: dt.date | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -198,27 +205,93 @@ def _maybe_run_daily_backup():
         )
 
 
+def _ts(iso: str) -> dt.datetime:
+    """DB-Zeitstempel -> aware datetime. Naive Werte (CURRENT_TIMESTAMP) sind UTC."""
+    t = dt.datetime.fromisoformat(iso)
+    return t.replace(tzinfo=dt.timezone.utc) if t.tzinfo is None else t
+
+
+def _ago(iso: str | None, now: dt.datetime | None = None) -> str:
+    """'vor 3h 12min' — kompakte Altersangabe für Zeitstempel aus der DB."""
+    if not iso:
+        return "—"
+    now = now or dt.datetime.now(dt.timezone.utc)
+    try:
+        mins = int((now - _ts(iso)).total_seconds() / 60)
+        if mins < 60:
+            return f"vor {mins} Min."
+        if mins < 1440:
+            return f"vor {mins // 60}h {mins % 60}min"
+        return f"vor {mins // 1440}d"
+    except Exception:
+        return str(iso)
+
+
+def _sources_lines(now: dt.datetime | None = None) -> list[str]:
+    """Eine Zeile pro Portal: wie viele Mails in 24h, wann die letzte kam.
+
+    ✅ liefert · ⚠️ still seit >24h · 🔴 still seit >72h oder noch nie."""
+    now   = now or dt.datetime.now(dt.timezone.utc)
+    stats = db.mail_source_stats(config.DB_PATH, window_h=24)
+    lines = []
+    for portal in email_source.MONITORED_PORTALS:
+        s    = stats.get(portal)
+        last = (s or {}).get("last")
+        if not last:
+            lines.append(f"🔴 {portal} — noch nie eine Mail")
+            continue
+        hours = (now - _ts(last)).total_seconds() / 3600
+        icon  = "✅" if hours < 24 else ("⚠️" if hours < 72 else "🔴")
+        lines.append(f"{icon} {portal} — {s['recent']} Mail(s)/24h, "
+                     f"letzte {_ago(last, now)}")
+    return lines
+
+
+def _monitor_text() -> str:
+    """Täglicher Überwachungsbericht für die Gruppe."""
+    now    = dt.datetime.now(dt.timezone.utc)
+    local  = dt.datetime.now(ZoneInfo("Europe/Zurich"))
+    state  = db.get_filter_state(config.DB_PATH)
+    last_m = db.last_mail_at(config.DB_PATH)
+    last_l = db.get_last_listing_at(config.DB_PATH)
+    stats  = db.mail_source_stats(config.DB_PATH, window_h=24)
+    total  = sum(s["recent"] for s in stats.values())
+
+    kopf = "📊 <b>Bot-Status</b> " + local.strftime("%d.%m. %H:%M")
+    if state.get("paused"):
+        kopf += "  ⏸ pausiert"
+
+    return (
+        f"{kopf}\n\n"
+        + "\n".join(_sources_lines(now))
+        + f"\n\n📨 Mail-Eingang 24h: {total}\n"
+        + f"📡 Letzte Mail: {_ago(last_m, now)}\n"
+        + f"🏠 Letztes Inserat: {_ago(last_l, now)}"
+    )
+
+
+def _maybe_send_monitor_report():
+    """Einmal täglich den Überwachungsbericht in die Gruppe schicken."""
+    global _last_monitor_date
+    now = dt.datetime.now(ZoneInfo("Europe/Zurich"))
+    if now.hour != _MONITOR_HOUR:
+        return
+    today = now.date()
+    if _last_monitor_date == today:
+        return
+    _last_monitor_date = today
+    notify.send_system(
+        config.TELEGRAM_BOT_TOKEN, config.TELEGRAM_CHAT_IDS, _monitor_text()
+    )
+    db.prune_mail_log(config.DB_PATH)
+    print("Überwachungsbericht gesendet.")
+
+
 def _health_text() -> str:
     """Zustand des Bots auf einen Blick: letzter Poll, geparste Mails, offene
     Resends, letztes Backup, DB-Größe. Liest prozessübergreifend aus der DB
     (der --loop schreibt die Poll-Stats in die meta-Tabelle)."""
     now = dt.datetime.now(dt.timezone.utc)
-
-    def _ago(iso: str | None) -> str:
-        if not iso:
-            return "—"
-        try:
-            t = dt.datetime.fromisoformat(iso)
-            if t.tzinfo is None:
-                t = t.replace(tzinfo=dt.timezone.utc)
-            mins = int((now - t).total_seconds() / 60)
-            if mins < 60:
-                return f"vor {mins} Min."
-            if mins < 1440:
-                return f"vor {mins // 60}h {mins % 60}min"
-            return f"vor {mins // 1440}d"
-        except Exception:
-            return str(iso)
 
     state   = db.get_filter_state(config.DB_PATH)
     last_p  = db.get_meta(config.DB_PATH, "last_poll")
@@ -247,12 +320,17 @@ def _health_text() -> str:
         db_kb = 0
 
     parse_warn = " ⚠️" if (str(fetched).isdigit() and int(fetched) > 0 and str(parsed) == "0") else ""
+    last_mail  = db.last_mail_at(config.DB_PATH)
     return (
         "🩺 <b>Bot-Health</b>\n\n"
         f"{'⏸ Pausiert' if state.get('paused') else '▶️ Aktiv'}\n"
-        f"📡 Letzter Poll: {_ago(last_p)}\n"
+        f"📡 Letzter Poll: {_ago(last_p, now)}\n"
         f"📨 Letzter Durchlauf: {fetched} Mail(s) empfangen, {parsed} geparst{parse_warn}\n"
-        f"📤 Offene Resends: {pending}{' ⚠️' if pending else ''}\n"
+        f"📬 Letzte Portal-Mail: {_ago(last_mail, now)}\n"
+        f"🏠 Letztes Inserat: {_ago(db.get_last_listing_at(config.DB_PATH), now)}\n\n"
+        "<b>Quellen</b>\n"
+        + "\n".join(_sources_lines(now))
+        + f"\n\n📤 Offene Resends: {pending}{' ⚠️' if pending else ''}\n"
         f"🗂 Inserate gesehen: {seen}\n"
         f"💾 Letztes Backup: {backup_line}\n"
         f"🗄 DB-Größe: {db_kb} KB"
@@ -865,6 +943,11 @@ def run():
             _maybe_run_daily_backup()
         except Exception as e:
             print(f"DB-Backup-Fehler (weiter): {e}")
+
+        try:
+            _maybe_send_monitor_report()
+        except Exception as e:
+            print(f"Überwachungsbericht-Fehler (weiter): {e}")
 
         updates = _get_updates(offset)
         for update in updates:

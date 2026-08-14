@@ -8,7 +8,9 @@ Aggregiert Schweizer Mietinserate aus mehreren Portalen in einen
 Telegram-Feed für eine 2er-WG-Suche (Max + Sam). Architektur:
 
 - **Homegate / ImmoScout24 / newhome / Flatfox** → Suchabos auf
-  wohnung.suchen@example.com; Bot pollt per IMAP, parst die Mails
+  wohnung.suchen@example.org (imap.mailbox.org, seit 22.06.2026 — das frühere
+  Gmail wohnung.suchen@example.com ist gesperrt); Bot pollt per IMAP, parst
+  die Mails
 - Pipeline: `Listing`-Objekte → SQLite-Dedup (inkl. Cross-Portal) →
   Filterung → Telegram-Versand an Gruppe `-1001234567890`
 
@@ -25,7 +27,7 @@ Telegram-Feed für eine 2er-WG-Suche (Max + Sam). Architektur:
 | `command.py` | Telegram Long-Polling, alle Befehle, tägliche Zusammenfassung 20h |
 | `main.py` | Orchestrierung: `--seed`, `--loop`, `--dump-emails` |
 | `plz_lookup.py` | PLZ ↔ Gemeindename für Kanton Zürich (162 Gemeinden) |
-| `test_command.py` | Unit-Tests (37 Tests, `python test_command.py`) |
+| `test_command.py` | Unit-Tests (50 Tests, `python test_command.py`) |
 
 ## Alle Telegram-Befehle
 
@@ -63,7 +65,7 @@ Telegram-Feed für eine 2er-WG-Suche (Max + Sam). Architektur:
 | `/delete <id>` | Als erledigt markieren |
 | `/cleanup` | Erledigte Inserate aus DB löschen |
 | `/portale` | Integrierte Portale anzeigen |
-| `/health` | Zustand: letzter Poll, empfangen/geparst, offene Resends, letztes Backup, DB-Größe |
+| `/health` | Zustand: letzter Poll, empfangen/geparst, **Mail-Eingang pro Portal**, letztes Inserat, offene Resends, letztes Backup, DB-Größe |
 | `/backup` | Konsistentes lokales DB-Backup jetzt erstellen (mit Integritätscheck) |
 | `/help` | Alle Befehle |
 
@@ -78,6 +80,27 @@ available, first_seen, last_seen, marked, marked_at, note
 ```
 
 `marked` Werte: `interesting`, `beworben`, `besichtigung`, `abgelehnt`, `done`, `null`
+
+## Überwachung (mail_log-Tabelle + Wächter in main.py)
+
+`mail_log (portal, ts, mails)` protokolliert, welches Portal wann Alert-Mails
+geliefert hat. Darauf setzen drei Dinge auf:
+
+- **Heartbeat** (`_check_heartbeat`): warnt nach 24h ohne Mail-Eingang von
+  irgendeinem Portal. Bezugsgröße ist der Mail-EINGANG — früher hing er an
+  `last_activity`, das bei jedem erfolgreichen Poll neu gesetzt wird und
+  deshalb auch bei totem Zufluss frisch aussah (24 Tage stiller Ausfall im
+  Juli/August 2026).
+- **Quellen-Wächter** (`_check_sources`): meldet einzelne Portale, die seit
+  >72h stumm sind, während andere liefern — typisch für ein deaktiviertes
+  oder nie bestätigtes Suchabo. Schweigt, wenn alle stumm sind (das ist der
+  Heartbeat-Fall). Überwacht werden nur `email_source.MONITORED_PORTALS`.
+- **Täglicher Bericht** (`command._maybe_send_monitor_report`, 08:00 Zürich):
+  Statuszeile pro Portal (Mails/24h, letzte Mail), Mail-Eingang gesamt,
+  letztes Inserat. Räumt dabei `mail_log` älter als 90 Tage weg.
+
+`monitor_since` (meta) ist der Referenzzeitpunkt, ab dem Stille zählt — ohne
+ihn bliebe eine frische Installation ohne je empfangene Mail alarmfrei.
 
 ## Filter-State (filter_state-Tabelle)
 
