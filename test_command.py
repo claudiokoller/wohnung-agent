@@ -284,6 +284,104 @@ def test_filter_kombination():
 
 
 # ---------------------------------------------------------------------------
+# Tests: db.filter_reason / Filter-Logging
+# ---------------------------------------------------------------------------
+
+def test_filter_reason_none_wenn_durchgelassen():
+    state = {"max_price": 2500, "plz_list": ["8001"], "exclude_kw": []}
+    l = _listing(id="ok", price="CHF 2000", rooms="3", location="8001 Zürich")
+    assert db.filter_reason(l, state) is None
+
+
+def test_filter_reason_plz_nicht_in_liste():
+    state = {"plz_list": ["8001"], "exclude_kw": []}
+    l = _listing(id="a", location="8400 Winterthur")
+    kat, text = db.filter_reason(l, state)
+    assert kat == "PLZ"
+    assert "8400" in text
+
+
+def test_filter_reason_plz_fehlt_ganz():
+    """Ort ohne erkennbare PLZ -> verworfen (hartes Kriterium), Grund sagt das."""
+    state = {"plz_list": ["8001"], "exclude_kw": []}
+    l = _listing(id="a", location="Zürich Kreis 4")
+    kat, text = db.filter_reason(l, state)
+    assert kat == "PLZ"
+    assert "keine PLZ" in text
+
+
+def test_filter_reason_preis():
+    state = {"max_price": 2500, "plz_list": [], "exclude_kw": []}
+    kat, text = db.filter_reason(_listing(id="a", price="CHF 3000"), state)
+    assert kat == "Preis"
+    assert "3000" in text and "2500" in text
+
+
+def test_filter_reason_zimmer_und_flaeche():
+    state = {"min_rooms": 2.5, "max_rooms": 4.5, "min_space": 50,
+             "plz_list": [], "exclude_kw": []}
+    assert db.filter_reason(_listing(id="a", rooms="2"), state)[0] == "Zimmer"
+    assert db.filter_reason(_listing(id="b", rooms="6"), state)[0] == "Zimmer"
+    assert db.filter_reason(_listing(id="c", rooms="3", space="42"), state)[0] == "Fläche"
+
+
+def test_filter_reason_exclude_nennt_das_keyword():
+    state = {"plz_list": [], "exclude_kw": ["studio", "keller"]}
+    kat, text = db.filter_reason(_listing(id="a", title="Schönes Studio"), state)
+    assert kat == "Exclude"
+    assert "studio" in text
+
+
+def test_filter_reason_erste_regel_gewinnt():
+    """Mehrere Kriterien verletzt -> gemeldet wird das erste in Prüfreihenfolge."""
+    state = {"max_price": 2500, "plz_list": ["8001"], "exclude_kw": []}
+    l = _listing(id="a", price="CHF 9000", location="8400 Winterthur")
+    assert db.filter_reason(l, state)[0] == "Preis"
+
+
+def test_apply_filter_fuellt_last_filter():
+    """LAST_FILTER trägt die Zahlen für die Abschlusszeile in main.py."""
+    listings = [
+        _listing(id="ok",    price="CHF 2000", location="8001 Zürich"),
+        _listing(id="teuer", price="CHF 3000", location="8001 Zürich"),
+        _listing(id="weg",   price="CHF 2000", location="8400 Winterthur"),
+    ]
+    state = {"max_price": 2500, "plz_list": ["8001"], "exclude_kw": []}
+    result = db.apply_filter(listings, state)
+    assert [l.id for l in result] == ["ok"]
+    assert db.LAST_FILTER["kept"] == 1
+    assert db.LAST_FILTER["dropped"] == 2
+    assert db.LAST_FILTER["reasons"] == {"Preis": 1, "PLZ": 1}
+
+
+def test_apply_filter_verbose_loggt_jede_verwerfung():
+    """verbose=True -> eine Zeile pro Verwerfung + Zusammenfassung."""
+    import io, contextlib
+    listings = [
+        _listing(id="ok",  price="CHF 2000", location="8001 Zürich"),
+        _listing(id="weg", price="CHF 2000", location="8400 Winterthur"),
+    ]
+    state = {"max_price": 2500, "plz_list": ["8001"], "exclude_kw": []}
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        db.apply_filter(listings, state, verbose=True)
+    out = buf.getvalue()
+    assert "8400" in out                    # das verworfene Inserat ist benannt
+    assert "8001" not in out                # das durchgelassene nicht
+    assert "1 von 2 verworfen" in out
+    assert "1× PLZ" in out
+
+
+def test_apply_filter_ohne_verbose_ist_still():
+    import io, contextlib
+    state = {"plz_list": ["8001"], "exclude_kw": []}
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        db.apply_filter([_listing(id="weg", location="8400 Winterthur")], state)
+    assert buf.getvalue() == ""
+
+
+# ---------------------------------------------------------------------------
 # Tests: db.get_listing (in-memory DB)
 # ---------------------------------------------------------------------------
 

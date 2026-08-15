@@ -305,6 +305,7 @@ def run_once(seed=False):
 
     new_count        = 0
     successful_srcs  = 0  # Quellen die ohne Exception durchliefen
+    filtered_count   = 0  # vom Filter verworfen (über alle Quellen)
 
     # Zuerst Liegengebliebenes nachsenden (z.B. nach Telegram-/Netzausfall),
     # damit der Rückstand abgebaut wird, bevor neue Mails verarbeitet werden.
@@ -342,8 +343,12 @@ def run_once(seed=False):
                 )
             continue
 
-        # Nachfiltern (PLZ, Exclude-Keywords; Preis/Zimmer bei Mail-Quelle)
-        listings = db.apply_filter(listings, filter_state)
+        # Nachfiltern (PLZ, Exclude-Keywords; Preis/Zimmer bei Mail-Quelle).
+        # verbose=True: jede Verwerfung mit Grund ins Log — sonst ist nicht
+        # unterscheidbar, ob ein leerer Durchlauf am Filter, an einem zu breiten
+        # Suchabo oder an einem stillen Parser-Bruch liegt.
+        listings = db.apply_filter(listings, filter_state, verbose=True)
+        filtered_count += db.LAST_FILTER["dropped"]
 
         for l in listings:
             # Immer in listings-Tabelle speichern (für /info, /merk, /weg)
@@ -398,7 +403,8 @@ def run_once(seed=False):
     elif paused:
         print("Durchlauf fertig. Bot ist pausiert — keine Nachrichten gesendet.")
     else:
-        print(f"Durchlauf fertig. {new_count} neue Inserate gesendet.")
+        extra = f" ({filtered_count} gefiltert)" if filtered_count else ""
+        print(f"Durchlauf fertig. {new_count} neue Inserate gesendet{extra}.")
 
 
 if __name__ == "__main__":

@@ -17,6 +17,11 @@ import sqlite3
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 
+# Diagnose des letzten apply_filter-Laufs (von main.py für die Abschlusszeile
+# gelesen) — analog zu email_source.LAST_RUN. Ohne das ist ein Durchlauf mit
+# «0 neue Inserate» nicht davon zu unterscheiden, dass gar nichts ankam.
+LAST_FILTER = {"kept": 0, "dropped": 0, "reasons": {}}
+
 
 @contextmanager
 def _conn(path):
@@ -613,11 +618,22 @@ def _parse_rooms(s) -> float | None:
         return None
 
 
-def apply_filter(listings: list, filter_state: dict) -> list:
-    """Wendet den Filter-State auf eine Liste von Listings an.
-    Fehlende/unparsbare Felder -> Inserat durchlassen (lieber zu viel)."""
+def filter_reason(l, filter_state: dict) -> tuple[str, str] | None:
+    """Prüft ein Inserat gegen den Filter-State.
+
+    Rückgabe: (Kategorie, Klartext-Grund) wenn das Inserat verworfen wird,
+    sonst None. Die Prüfreihenfolge ist die der bisherigen Filterlogik —
+    gemeldet wird das ERSTE zutreffende Kriterium.
+
+    Aus apply_filter herausgelöst, damit eine Verwerfung begründbar wird:
+    gefilterte Inserate landen weder in der listings-Tabelle (upsert_listing
+    läuft erst danach) noch bleibt ihre Mail liegen (die löscht email_source
+    im selben Durchlauf) — ohne Log sind sie spurlos weg, und ein Durchlauf
+    mit 0 Treffern sieht identisch aus, egal ob die PLZ, der Preis oder ein
+    kaputter Parser schuld war.
+    """
     if not filter_state:
-        return listings
+        return None
 
     max_price    = filter_state.get("max_price")
     min_rooms    = filter_state.get("min_rooms")
@@ -628,66 +644,111 @@ def apply_filter(listings: list, filter_state: dict) -> list:
     kw_list      = filter_state.get("kw_list", [])
     verfuegbar_ab = filter_state.get("verfuegbar_ab")  # "YYYY-MM" oder None
 
-    out = []
+    # --- Preis-Filter ---
+    if max_price:
+        price_num = _parse_price(l.price)
+        if price_num is not None and price_num > max_price:
+            return ("Preis", f"Preis {price_num:g} > max {max_price:g}")
+
+    # --- Zimmer-Filter ---
+    rooms_num = _parse_rooms(l.rooms)
+    if rooms_num is not None:
+        if min_rooms and rooms_num < min_rooms:
+            return ("Zimmer", f"Zimmer {rooms_num:g} < min {min_rooms:g}")
+        if max_rooms and rooms_num > max_rooms:
+            return ("Zimmer", f"Zimmer {rooms_num:g} > max {max_rooms:g}")
+
+    # --- Flächen-Filter ---
+    if min_space:
+        space_num = _parse_rooms(l.space)  # gleiche Parsing-Logik
+        if space_num is not None and space_num < min_space:
+            return ("Fläche", f"Fläche {space_num:g} < min {min_space:g}")
+
+    # --- PLZ-Filter (HARTES Kriterium) ---
+    # PLZ ist das wichtigste Kriterium und wird strikt durchgesetzt: bei
+    # gesetzter Liste MUSS das Inserat eine erkannte PLZ aus der Liste haben.
+    # Inserate ohne erkennbare PLZ werden VERWORFEN (Ausnahme vom sonstigen
+    # "lieber durchlassen"-Prinzip — bewusst, damit kein Inserat ausserhalb
+    # des Gebiets durchrutscht).
+    if plz_list:
+        loc = (l.location or "").strip()
+        plz_m = re.match(r"^(\d{4})\b", loc)
+        if not plz_m:
+            return ("PLZ", f"keine PLZ erkennbar in {loc!r}")
+        if plz_m.group(1) not in plz_list:
+            return ("PLZ", f"PLZ {plz_m.group(1)} nicht in Liste")
+
+    # --- Exclude-Keywords ---
+    if exclude_kw:
+        haystack = f"{l.title} {l.location}".lower()
+        for kw in exclude_kw:
+            if kw.strip() and kw.strip().lower() in haystack:
+                return ("Exclude", f"Ausschluss-Keyword {kw.strip()!r} gefunden")
+
+    # --- Keyword-Whitelist ---
+    # Mindestens ein Keyword muss vorkommen; leer = kein Filter.
+    if kw_list:
+        haystack = f"{l.title} {l.location}".lower()
+        if not any(kw.strip().lower() in haystack for kw in kw_list if kw.strip()):
+            return ("Keyword", f"kein Keyword aus {kw_list} gefunden")
+
+    # --- Verfügbarkeits-Filter ---
+    # Inserate die erst nach dem Zieldatum frei sind, werden übersprungen.
+    # Kein available-Feld oder "ab sofort" -> immer durchlassen.
+    if verfuegbar_ab:
+        try:
+            target_y, target_m = map(int, verfuegbar_ab.split("-"))
+            avail_ym = _parse_available_ym(getattr(l, "available", None) or "")
+            if avail_ym is not None and avail_ym > (target_y, target_m):
+                return ("Verfügbar",
+                        f"frei ab {avail_ym[0]}-{avail_ym[1]:02d}, gesucht bis {verfuegbar_ab}")
+        except Exception:
+            pass
+
+    return None
+
+
+def _listing_label(l) -> str:
+    """Einzeiler fürs Filter-Log: Portal, gekürzter Titel, Ort, Preis."""
+    title = (l.title or "?").strip()
+    if len(title) > 40:
+        title = title[:39] + "…"
+    parts = [str(l.source or "?"), f'"{title}"']
+    if l.location:
+        parts.append(str(l.location).strip())
+    if l.price:
+        parts.append(str(l.price).strip())
+    return " ".join(parts)
+
+
+def apply_filter(listings: list, filter_state: dict, verbose: bool = False) -> list:
+    """Wendet den Filter-State auf eine Liste von Listings an.
+    Fehlende/unparsbare Felder -> Inserat durchlassen (lieber zu viel).
+
+    verbose=True schreibt pro verworfenem Inserat eine Zeile mit Grund nach
+    stdout (landet im journal) plus eine Zusammenfassung. LAST_FILTER wird
+    immer gefüllt, damit main.py die Zahl in die Abschlusszeile nehmen kann.
+    """
+    out, reasons = [], {}
     for l in listings:
-        # --- Preis-Filter ---
-        if max_price:
-            price_num = _parse_price(l.price)
-            if price_num is not None and price_num > max_price:
-                continue
+        reason = filter_reason(l, filter_state)
+        if reason is None:
+            out.append(l)
+            continue
+        kat, text = reason
+        reasons[kat] = reasons.get(kat, 0) + 1
+        if verbose:
+            print(f"Filter: {_listing_label(l)} — {text}")
 
-        # --- Zimmer-Filter ---
-        rooms_num = _parse_rooms(l.rooms)
-        if rooms_num is not None:
-            if min_rooms and rooms_num < min_rooms:
-                continue
-            if max_rooms and rooms_num > max_rooms:
-                continue
+    dropped = sum(reasons.values())
+    if verbose and dropped:
+        summary = ", ".join(f"{n}× {k}" for k, n in
+                            sorted(reasons.items(), key=lambda kv: (-kv[1], kv[0])))
+        print(f"Filter: {dropped} von {dropped + len(out)} verworfen ({summary}).")
 
-        # --- Flächen-Filter ---
-        if min_space:
-            space_num = _parse_rooms(l.space)  # gleiche Parsing-Logik
-            if space_num is not None and space_num < min_space:
-                continue
-
-        # --- PLZ-Filter (HARTES Kriterium) ---
-        # PLZ ist das wichtigste Kriterium und wird strikt durchgesetzt: bei
-        # gesetzter Liste MUSS das Inserat eine erkannte PLZ aus der Liste haben.
-        # Inserate ohne erkennbare PLZ werden VERWORFEN (Ausnahme vom sonstigen
-        # "lieber durchlassen"-Prinzip — bewusst, damit kein Inserat ausserhalb
-        # des Gebiets durchrutscht).
-        if plz_list:
-            loc = (l.location or "").strip()
-            plz_m = re.match(r"^(\d{4})\b", loc)
-            if not plz_m or plz_m.group(1) not in plz_list:
-                continue
-
-        # --- Exclude-Keywords ---
-        if exclude_kw:
-            haystack = f"{l.title} {l.location}".lower()
-            if any(kw.strip().lower() in haystack for kw in exclude_kw if kw.strip()):
-                continue
-
-        # --- Keyword-Whitelist ---
-        # Mindestens ein Keyword muss vorkommen; leer = kein Filter.
-        if kw_list:
-            haystack = f"{l.title} {l.location}".lower()
-            if not any(kw.strip().lower() in haystack for kw in kw_list if kw.strip()):
-                continue
-
-        # --- Verfügbarkeits-Filter ---
-        # Inserate die erst nach dem Zieldatum frei sind, werden übersprungen.
-        # Kein available-Feld oder "ab sofort" -> immer durchlassen.
-        if verfuegbar_ab:
-            try:
-                target_y, target_m = map(int, verfuegbar_ab.split("-"))
-                avail_ym = _parse_available_ym(getattr(l, "available", None) or "")
-                if avail_ym is not None and avail_ym > (target_y, target_m):
-                    continue
-            except Exception:
-                pass
-
-        out.append(l)
+    LAST_FILTER["kept"]    = len(out)
+    LAST_FILTER["dropped"] = dropped
+    LAST_FILTER["reasons"] = reasons
     return out
 
 

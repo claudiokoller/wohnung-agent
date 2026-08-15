@@ -132,7 +132,25 @@ aufweichen — der Parser liest die PLZ zuverlässig.
 
 **Parser-Diagnose:** `python main.py --dump-emails` zeigt geparste
 Listings direkt mit ✓/⚠-Flags pro Feld — wichtig nach Template-Änderungen
-der Portale.
+der Portale. Nur brauchbar, solange die Mails noch im Postfach liegen — der
+Bot löscht sie im Durchlauf, in dem er sie verarbeitet.
+
+**Filter-Diagnose:** `db.filter_reason()` gibt zu jedem verworfenen Inserat
+`(Kategorie, Grund)` zurück; `apply_filter(..., verbose=True)` (so ruft
+`main.py` es auf) schreibt das ins Log:
+
+```
+Filter: Flatfox "3.5 Zimmer Wohnung" 8004 Zürich CHF 2100 — PLZ 8004 nicht in Liste
+Filter: 5 von 6 verworfen (2× PLZ, 1× Fläche, 1× Preis, 1× Zimmer).
+Durchlauf fertig. 1 neue Inserate gesendet (5 gefiltert).
+```
+
+Grund: verworfene Inserate hinterlassen sonst KEINE Spur — `upsert_listing`
+läuft erst nach `apply_filter`, und die Mail ist im selben Durchlauf gelöscht.
+Ohne das Log sieht «Filter zu eng», «Suchabo zu breit» und «Parser gebrochen»
+im Journal identisch aus (alle drei: `0 neue Inserate gesendet`). Beim
+Nachschauen zählt die Verteilung: lauter fremde PLZ ⇒ Abo im Portal falsch
+eingestellt; viele knapp über `max_price` ⇒ Bot-Filter enger als der Markt.
 
 **Tests:** `python test_command.py` (kein pytest nötig, läuft direkt).
 Mit pytest: `pytest test_command.py -v`.
