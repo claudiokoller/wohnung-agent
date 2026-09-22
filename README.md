@@ -15,6 +15,13 @@ automatischem Deployment. Danach pausiert: Wohnung gefunden.
 > Python 3.10+ · SQLite · IMAP · Telegram Bot API · systemd · GitHub Actions
 > · keine Frameworks · ~4'800 Zeilen · 60 Unit-Tests
 
+<!-- Screenshot: Datei als docs/bilder/telegram-feed.png ablegen und die
+     folgende Zeile einkommentieren. Vorher Gruppennamen, Mitgliederliste und
+     eigene Nachrichten wegschneiden.
+
+![Ein Inserat im Telegram-Feed mit Inline-Buttons und Bewerbungsentwurf](docs/bilder/telegram-feed.png)
+-->
+
 ---
 
 ## Das Problem
