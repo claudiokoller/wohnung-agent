@@ -1,32 +1,17 @@
+# Deployment auf den eigenen VPS. Bewusst nur manuell auslösbar
+# (Actions -> Deploy to VPS -> Run workflow), damit ein Push nicht
+# ungefragt die Services auf dem Server neu startet.
+#
+# Benötigt die Repository-Secrets SSH_PRIVATE_KEY, SSH_HOST, SSH_USER.
+
 name: Deploy to VPS
 
 on:
-  push:
-    branches: [master]
+  workflow_dispatch:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Python einrichten
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Abhängigkeiten installieren
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-
-      - name: Syntax-/Import-Check
-        run: |
-          python -m compileall -q .
-          python -c "import config, db, sources, notify, email_source, imap_auth, application, main, command; print('imports ok')"
-
-      - name: Unit-Tests
-        run: python test_command.py
+    uses: ./.github/workflows/ci.yml
 
   deploy:
     needs: test

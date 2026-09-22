@@ -8,7 +8,7 @@ TELEGRAM_BOT_TOKEN = os.getenv("WOHNUNGS_BOT_TOKEN", "DEIN_BOT_TOKEN")
 # Alternative: gemeinsame Gruppe erstellen, Bot reinholen, dann nur die
 # Gruppen-Chat-ID (negativ, z.B. -100123...) hier reintun.
 TELEGRAM_CHAT_IDS = [
-    "-1001234567890",        # Gruppe "Bot Wohnungssuche ZH"
+    "-1001234567890",        # Platzhalter: eigene Gruppen-Chat-ID eintragen
 ]
 
 # --- Suchkriterien ---
@@ -68,6 +68,7 @@ DB_PATH = os.getenv("WOHNUNGS_DB", "listings.db")
 
 # --- Bewerbungs-/Besichtigungsanfrage --------------------------------------
 # Wird bei jedem neuen Treffer als fertiger Entwurf erzeugt.
+# Beispielprofil — vor dem Einsatz durch die eigenen Angaben ersetzen.
 APPLICANT = {
     "names": "Max Muster & Sam Beispiel",
     "household": "wg",

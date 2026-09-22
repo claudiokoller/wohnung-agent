@@ -7,3 +7,4 @@ listings.db
 email_dumps/
 drafts/
 client_secret.json
+.claude/

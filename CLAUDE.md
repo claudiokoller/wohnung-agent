@@ -8,11 +8,10 @@ Aggregiert Schweizer Mietinserate aus mehreren Portalen in einen
 Telegram-Feed für eine 2er-WG-Suche (Max + Sam). Architektur:
 
 - **Homegate / ImmoScout24 / newhome / Flatfox** → Suchabos auf
-  wohnung.suchen@example.org (imap.mailbox.org, seit 22.06.2026 — das frühere
-  Gmail wohnung.suchen@example.com ist gesperrt); Bot pollt per IMAP, parst
-  die Mails
+  ein dediziertes IMAP-Postfach (Zugangsdaten in `.env`); Bot pollt
+  per IMAP, parst die Mails
 - Pipeline: `Listing`-Objekte → SQLite-Dedup (inkl. Cross-Portal) →
-  Filterung → Telegram-Versand an Gruppe `-1001234567890`
+  Filterung → Telegram-Versand an die konfigurierte Gruppe
 
 ## Modulübersicht
 
@@ -112,8 +111,8 @@ paused, last_activity
 
 ## Infrastruktur
 
-- VPS: `203.0.113.10`, User: `root`, Pfad: `/root/wohnungs-bot/`
-- Deploy: Push auf `master` → GitHub Actions → SCP auf VPS → Services neu starten
+- VPS (Ubuntu), Pfad `/root/wohnungs-bot/` — Host/User liegen in den GitHub-Secrets, nicht im Repo
+- Deploy: GitHub Actions (manuell ausgelöst) → Tests → SCP auf VPS → Services neu starten
 - Services: `wohnungs-bot.service` (main --loop) + `wohnungs-bot-cmd.service` (command.py)
 - `.env` auf VPS (nie ins Git): `WOHNUNGS_BOT_TOKEN`, IMAP-Zugangsdaten, `WOHNUNGS_DB`
 

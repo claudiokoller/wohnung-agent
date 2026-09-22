@@ -1,114 +1,156 @@
 # Wohnungs-Bot Zürich
 
-Pollt neue Mietinserate, filtert nach euren Kriterien, dedupliziert über
-SQLite und schickt neue Treffer per Telegram an dich + deinen Kollegen.
+Ein Telegram-Bot, der Mietinserate aus vier Schweizer Immobilienportalen in
+einen gemeinsamen Chat bündelt: filtert nach eigenen Kriterien, entfernt
+Duplikate über Portalgrenzen hinweg und schreibt zu jedem Treffer einen
+fertigen Bewerbungsentwurf.
 
-## Setup
+Gebaut für eine 2er-WG-Suche in der Region Zürich und dort von Mai bis
+September 2026 durchgehend produktiv gelaufen — auf einem eigenen VPS, mit
+automatischem Deployment. Danach pausiert: Wohnung gefunden.
 
-1. **Bot erstellen**: bei `@BotFather` `/newbot`, Token kopieren.
-2. **Chat-IDs holen**: du + Kollege schreiben dem Bot je eine Nachricht,
-   `@userinfobot` gibt die numerische Chat-ID zurück. Beide in
-   `config.py` -> `TELEGRAM_CHAT_IDS` eintragen.
-   (Tipp: gemeinsame Gruppe + Bot reinholen ist oft praktischer als zwei IDs.)
-3. **Token setzen**:
-   ```bash
-   export WOHNUNGS_BOT_TOKEN="123456:ABC..."
-   ```
-4. **Suchabos auf den Portalen** einrichten (Homegate, ImmoScout24,
-   newhome, Flatfox) mit euren Kriterien -> die schicken Treffer-Mails.
-5. **IMAP konfigurieren** (für die Portal-Mails):
-   ```bash
-   export WOHNUNGS_IMAP_USER="deinmail@gmail.com"
-   export WOHNUNGS_IMAP_PASS="<app-passwort>"
-   ```
-   - Gmail braucht ein **App-Passwort** (Account -> Sicherheit ->
-     App-Passwörter), das normale Passwort geht bei IMAP nicht.
-   - Empfehlung: Gmail-Filter -> alle Portal-Mails in ein Label
-     `wohnung`, dann `WOHNUNGS_IMAP_FOLDER=wohnung`. Hält die INBOX
-     sauber und die Suche schnell.
-6. **Kriterien anpassen** in `config.py` (Preis, Zimmer, m², Bounding Box –
-   gilt für Flatfox; die Mail-Treffer sind schon portalseitig gefiltert).
-7. **Installieren & seeden**:
-   ```bash
-   pip install -r requirements.txt
-   python main.py --seed     # markiert Altinserate als gesehen, sendet nichts
-   ```
-8. **Laufen lassen** – Dauerschleife:
-   ```bash
-   python main.py --loop
-   ```
-   ...oder per cron alle 15 Min (sauberer für nen Server):
-   ```
-   */15 * * * * cd /pfad/wohnungs-bot && python main.py
-   ```
+> Python 3.10+ · SQLite · IMAP · Telegram Bot API · systemd · GitHub Actions
+> · keine Frameworks · ~4'800 Zeilen · 60 Unit-Tests
 
-## IMAP-Parser tunen
+---
 
-Die Portal-HTML-Templates ändern sich und Links sind oft
-Tracking-Redirects. Die Parser in `email_source.py` sind brauchbare
-Defaults – verifizier sie einmal gegen echte Mails:
+## Das Problem
 
-```bash
-python main.py --dump-emails   # speichert rohe HTML-Bodies nach ./email_dumps/
-```
+Wer in Zürich eine Wohnung sucht, hat Suchabos bei Homegate, ImmoScout24,
+newhome und Flatfox — und damit vier Mailfluten, in denen dieselben Inserate
+mehrfach auftauchen, viele gar nicht zu den eigenen Kriterien passen und die
+interessanten untergehen. Zu zweit suchen heisst zusätzlich: beide müssen
+denselben Stand haben.
 
-Dann je eine Mail pro Portal anschauen und bei Bedarf `LISTING_PATTERNS`
-bzw. die Preis-/Zimmer-Regexe anpassen. `--dump-emails` markiert nichts
-als gelesen und sendet nichts.
+Der Bot dreht das um. Ein Kanal, ein Feed, keine Duplikate, Filter jederzeit
+per Chat-Befehl änderbar.
 
 ## Architektur
 
-- `config.py`       – Telegram + Suchkriterien + IMAP + Bewerber-Profil
-- `sources.py`      – Flatfox-API-Quelle + `Listing`-Datentyp
-- `email_source.py` – IMAP-Quelle (Portal-Alert-Mails -> `Listing`)
-- `application.py`  – CH-Bewerbungsvorlage + optionaler Postfach-Entwurf
-- `db.py`           – SQLite-Dedup
-- `notify.py`       – Telegram-Versand (Treffer + Entwurf)
-- `main.py`         – Orchestrierung (einmal / `--loop` / `--seed` /
-  `--dump-emails`)
+```mermaid
+flowchart LR
+    subgraph Portale
+        HG[Homegate]
+        IS[ImmoScout24]
+        NH[newhome]
+        FF[Flatfox]
+    end
 
-## Bewerbungs-Entwurf
+    HG & IS & NH & FF -->|Suchabo-Mails| MB[(IMAP-Postfach)]
+    MB --> ES["email_source.py<br/>HTML-Parser"]
+    ES --> LI["Listing-Objekte"]
+    LI --> DEDUP{"db.py<br/>Dedup"}
+    DEDUP -->|bekannt| X["verworfen"]
+    DEDUP -->|neu| FILT{"apply_filter<br/>Preis, Zimmer, PLZ, m²"}
+    FILT -->|passt nicht| LOG["Grund ins Log"]
+    FILT -->|Treffer| NO["notify.py"]
+    NO --> TG(["Telegram-Gruppe"])
+    NO --> AP["application.py<br/>Bewerbungsentwurf"]
+    AP --> TG
 
-Bei jedem neuen Treffer baut der Bot aus `config.APPLICANT` ein
-fertiges Anschreiben (Standard-Deutsch, Sie-Form, CH-Konventionen,
-Hinweis aufs vollständige Dossier) und schickt es als
-kopierfertige Telegram-Nachricht direkt hinter dem Inserat.
+    CMD["command.py<br/>Long-Polling"] <-->|Befehle| TG
+    CMD <--> DB[("SQLite<br/>Filter-State + Inserate")]
+    DEDUP <--> DB
+    FILT <--> DB
+```
 
-Profil einmal in `config.py` -> `APPLICANT` ausfüllen
-(`household`: `single` / `paar` / `wg` / `familie` bestimmt die
-Formulierung). Zusätzliche Ausgabewege per Flags:
+**Details zur Architektur, den Datenflüssen und den technischen Entscheiden:
+[docs/architektur.md](docs/architektur.md)**
 
-- `DRAFT_IN_TELEGRAM` – kopierfertig im Chat (Default an)
-- `DRAFT_SAVE_FILES`  – zusätzlich als `.txt` nach `./drafts/`
-- `DRAFT_IMAP_APPEND` – als echter Entwurf ins Postfach
-  (`DRAFT_IMAP_FOLDER` provider-spezifisch: Gmail `[Gmail]/Drafts`,
-  GMX `Entwürfe`)
+## Technische Entscheide
 
-**Wichtig:** kein Auto-Versand. Die Empfänger-Adresse steht fast nie
-im Inserat – Kontakt läuft über das Portal-Kontaktformular. Der Bot
-liefert den passgenauen Entwurf, einfügen/abschicken machst du.
+**Suchabo-Mails statt Scraping.** Die Portale sind hinter Cloudflare und
+verbieten Scraping in den AGB. Ihre eigenen Suchabo-Mails liefern dieselben
+Treffer freiwillig und legal — und die Portale filtern schon vor. Kein
+Bot-Schutz zu umgehen, keine Scraper-Wartung bei jedem Redesign.
 
-Jede Quelle ist `(search, cfg) -> list[Listing]` und wird in
-`main.SOURCES` registriert. Beide Quellen laufen durch denselben
-Dedup-/Telegram-Pfad, Cross-Portal-Duplikate werden über die
-Listing-ID rausgefiltert.
+**Dedup über Portalgrenzen.** Dasselbe Inserat kommt oft von drei Portalen.
+Der Bot löst die Tracking-Redirects auf, um an die echte Listing-ID zu
+kommen (stabiler Schlüssel), und fällt auf einen Inhalts-Fingerprint
+zurück, wenn das nicht klappt.
 
-## Quellen erweitern
+**Die Datenbank führt, nicht die Config.** Filter sind zur Laufzeit per
+Telegram änderbar (`/preis 2400`). `config.SEARCH` seedet nur den ersten
+Start, danach ist die SQLite-Tabelle die einzige Wahrheit — sonst driften
+zwei Filterstände auseinander.
 
-`fetch_flatfox` (offene JSON-API) und `fetch_email` (IMAP-Suchabos)
-decken zusammen Flatfox + Homegate + ImmoScout24 + newhome ab, ohne
-Cloudflare-Bot-Schutz umgehen zu müssen. Weitere Quelle = neue
-Funktion `(search, cfg) -> list[Listing]`, dann in `main.SOURCES`
-ergänzen.
+**Bewerbungsentwurf ohne LLM.** Ein deterministisches Template aus dem
+Bewerberprofil. Verlässlich, kostenlos, keine Halluzination in einem Text,
+der an einen Vermieter geht. Verschickt wird nichts automatisch: die
+Empfängeradresse steht fast nie im Inserat, der Kontakt läuft übers
+Portalformular. Der Bot liefert den fertigen Text, absenden macht der Mensch.
 
-Falls Flatfox das Feld-Mapping ändert: rohe JSON-Response loggen und
-`fetch_flatfox` anpassen. Falls eine Portal-Mail nicht sauber geparst
-wird: `--dump-emails` und `LISTING_PATTERNS` in `email_source.py`
-nachziehen.
+**Verworfene Inserate hinterlassen eine Spur.** Wenn nichts durchkommt, sieht
+"Filter zu eng", "Suchabo zu breit" und "Parser gebrochen" im Log sonst
+identisch aus. Deshalb protokolliert der Bot zu jedem verworfenen Inserat den
+Grund und die Verteilung: `5 von 6 verworfen (2× PLZ, 1× Fläche, 1× Preis)`.
 
-## Hinweis
+## Telegram-Befehle
 
-Höfliches Poll-Intervall lassen (15 Min reicht für Wohnungssuche
-locker). Der Weg über Suchabo-Mails ist bewusst gewählt: ToS-konform,
-kein Bot-Schutz-Problem, keine Scraper-Wartung – die Portale liefern
-die Treffer selbst, der Bot bündelt sie nur für euch beide.
+| Bereich | Befehle |
+|---|---|
+| Filter | `/preis` · `/zimmer` · `/plz` (mit Gemeindenamen statt PLZ) · `/exclude` · `/pause` · `/resume` |
+| Inserate | `/liste` · `/delete` · `/now` |
+| Status | `/status` · `/stats` · `/portale` · `/help` |
+
+Jedes Inserat kommt mit Inline-Buttons: ⭐ Merken und 📝 Entwurf. Um 20:00
+Zürich-Zeit fasst der Bot die gemerkten Inserate des Tages zusammen.
+
+## Betrieb: was schiefging
+
+Der interessanteste Teil des Projekts war nicht das Bauen, sondern die vier
+Monate danach. Drei Ausfälle, jeder still — der Bot lief fehlerfrei weiter
+und schickte einfach nichts mehr:
+
+| Ausfall | Ursache | Konsequenz im Code |
+|---|---|---|
+| Feed 9 Tage leer | Postfach-Quota voll, Provider wies eingehende Mails ab | Verarbeitete Mails werden gelöscht statt nur als gelesen markiert |
+| Feed 2 Wochen leer | Mailkonto gesperrt, IMAP-Login abgelehnt | Eskalation bei Fehler-Streaks statt endlosem Retry als "transient" |
+| Feed leer trotz Mails | Suchabos breiter gefasst als der Bot-Filter | Verwerfungsgrund pro Inserat im Log |
+
+Die Lehre: Ein Bot, der Nachrichten weiterleitet, meldet seinen eigenen
+Ausfall nicht — Stille sieht aus wie "nichts Passendes dabei". Deshalb
+überwacht er inzwischen den Maileingang pro Portal und meldet sich selbst,
+wenn eine Quelle verstummt.
+
+## Setup
+
+```bash
+git clone https://github.com/claudiokoller/wohnungs-bot.git
+cd wohnungs-bot
+pip install -r requirements.txt
+
+cp .env.example .env        # Bot-Token, IMAP-Zugang, DB-Pfad eintragen
+# Suchkriterien und Bewerberprofil in config.py anpassen
+
+python main.py --seed       # Altinserate als gesehen markieren, nichts senden
+python main.py --loop       # Dauerbetrieb, Poll alle 15 Minuten
+python command.py           # Telegram-Befehle (zweiter Prozess)
+```
+
+Ausführliche Schritt-für-Schritt-Anleitung inklusive Telegram-Gruppe, IMAP
+und systemd: [SETUP.md](SETUP.md).
+
+```bash
+python test_command.py      # 60 Tests, ohne pytest lauffähig
+```
+
+## Module
+
+| Datei | Aufgabe |
+|---|---|
+| `main.py` | Orchestrierung: `--seed`, `--loop`, `--dump-emails` |
+| `email_source.py` | IMAP-Quelle: Alert-Mails → `Listing` |
+| `sources.py` | `Listing`-Datentyp + Telegram-Formatierung |
+| `db.py` | SQLite: Dedup, Filter-State, Merkliste, Mail-Log |
+| `command.py` | Telegram Long-Polling, alle Befehle, Tagesübersicht |
+| `notify.py` | Telegram-Versand mit Inline-Buttons |
+| `application.py` | Bewerbungsvorlage |
+| `plz_lookup.py` | PLZ ↔ Gemeindename, 162 Gemeinden Kanton Zürich |
+| `imap_auth.py` | Login providerneutral (Passwort oder OAuth2/XOAUTH2) |
+
+## Lizenz
+
+MIT — siehe [LICENSE](LICENSE). Die Suchkriterien und das Bewerberprofil in
+`config.py` sind Platzhalter; echte Zugangsdaten gehören in `.env` und sind
+nie Teil dieses Repos.
