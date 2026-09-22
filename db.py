@@ -25,7 +25,7 @@ LAST_FILTER = {"kept": 0, "dropped": 0, "reasons": {}}
 
 @contextmanager
 def _conn(path):
-    # timeout/busy_timeout: drei Prozesse (main-loop, command, backfill) teilen
+    # timeout/busy_timeout: zwei Prozesse (main-loop, command) teilen
     # sich die DB. WAL erlaubt parallele Leser + 1 Schreiber; busy_timeout lässt
     # einen kollidierenden Schreiber kurz warten statt sofort «database is locked».
     con = sqlite3.connect(path, timeout=10.0)

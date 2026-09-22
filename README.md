@@ -1,5 +1,8 @@
 # Wohnungs-Bot Zürich
 
+[![Tests](https://github.com/claudiokoller/wohnungs-bot/actions/workflows/ci.yml/badge.svg)](https://github.com/claudiokoller/wohnungs-bot/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
 Ein Telegram-Bot, der Mietinserate aus vier Schweizer Immobilienportalen in
 einen gemeinsamen Chat bündelt: filtert nach eigenen Kriterien, entfernt
 Duplikate über Portalgrenzen hinweg und schreibt zu jedem Treffer einen
@@ -91,7 +94,8 @@ Grund und die Verteilung: `5 von 6 verworfen (2× PLZ, 1× Fläche, 1× Preis)`.
 |---|---|
 | Filter | `/preis` · `/zimmer` · `/plz` (mit Gemeindenamen statt PLZ) · `/exclude` · `/pause` · `/resume` |
 | Inserate | `/liste` · `/delete` · `/now` |
-| Status | `/status` · `/stats` · `/portale` · `/help` |
+| Status | `/status` (Filter) · `/stats` (Zahlen) · `/portale` (Quellen) · `/help` |
+| Betrieb | `/health` (Zustand pro Portal) · `/backup` (DB-Backup) |
 
 Jedes Inserat kommt mit Inline-Buttons: ⭐ Merken und 📝 Entwurf. Um 20:00
 Zürich-Zeit fasst der Bot die gemerkten Inserate des Tages zusammen.

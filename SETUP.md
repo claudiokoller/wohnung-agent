@@ -1,94 +1,110 @@
-# Setup-Checkliste
+# Setup
 
-Schritt für Schritt, in dieser Reihenfolge. Hak ab, was erledigt ist.
+Von null bis Dauerbetrieb. Die Kurzfassung steht im [README](README.md) —
+hier die vollständige Reihenfolge inklusive Postfach, Suchabos und systemd.
 
-## Phase 1 — Vorbereitung (alleine machbar, parallel zu Phase 2)
+Voraussetzungen: Python 3.10+, ein IMAP-Postfach, ein Telegram-Konto. Für den
+Dauerbetrieb ein kleiner Server (ein 5-Euro-VPS reicht).
 
-- [ ] **Pseudo-Gmail anlegen** (z.B. `wohnung.suchen@example.com`)
-  - 2FA aktivieren (Pflicht für App-Passwort)
-  - App-Passwort generieren: Account → Sicherheit → 2-Schritt-Verifizierung → App-Passwörter
-  - Passwort sicher notieren (16 Zeichen ohne Leerzeichen)
-- [ ] **Telegram-Bot erstellen**
-  - `@BotFather` anschreiben → `/newbot`
-  - Name + Username vergeben → Token notieren
-- [ ] **Telegram-Gruppe erstellen**
-  - Kollege einladen
-  - Bot einladen (Username eingeben)
-  - In der Gruppe `/start` schreiben
-  - Gruppen-Chat-ID holen: kurz `@RawDataBot` in die Gruppe holen, Chat-ID auslesen (beginnt mit `-100…`), Bot wieder entfernen
-- [ ] **VPS aufsetzen** (z.B. Hetzner CX11, Ubuntu 24.04)
-  - SSH-Zugang testen
-  - Python 3.10+ prüfen: `python3 --version`
-  - Optional: `tmux` installieren für persistente Sessions
+## 1. Telegram vorbereiten
 
-## Phase 2 — Daten vom Kollegen einholen
+- [ ] Bot erstellen: `@BotFather` anschreiben → `/newbot` → Token notieren
+- [ ] Gruppe erstellen und den Bot hineinholen (praktischer als Einzelchats,
+      wenn zu zweit gesucht wird)
+- [ ] In der Gruppe `/start` schreiben
+- [ ] Gruppen-Chat-ID auslesen: kurz `@RawDataBot` in die Gruppe holen, die
+      negative ID notieren, Bot wieder entfernen
 
-- [ ] Vollständiger Name
-- [ ] Beruf + Anstellungs-Status (z.B. "Softwareentwickler, festangestellt bei X")
-- [ ] **Private Gmail-Adresse** (Absender im Anschreiben)
-- [ ] Telefonnummer (CH-Format)
-- [ ] Gewünschter Bezugstermin
-- [ ] Such-Kriterien grob: Preisrahmen, Zimmer-Range, Region (für die Portal-Suchabos)
-- [ ] Entscheidung: Draft-Ablage in seinem privaten Gmail aktivieren?
-  - Falls ja: braucht App-Passwort *seines* privaten Accounts
-  - Falls nein: Entwurf landet nur im Telegram-Chat, er kopiert von Hand
+## 2. Postfach für die Portal-Mails
 
-## Phase 3 — Portal-Suchabos einrichten (alle auf die Pseudo-Adresse)
+Ein **eigenes Postfach nur für den Bot** — nicht das private. Er löscht
+verarbeitete Mails, und die Suchabos produzieren viel Volumen.
 
-Wichtig: **bewusst breit**. Filtern macht der Bot.
+- [ ] Postfach bei einem Anbieter anlegen, der IMAP-Logins aus Rechenzentren
+      zulässt. Grosse Freemail-Anbieter blocken Logins von Server-IPs gern
+      dauerhaft — das war in diesem Projekt die häufigste Ausfallursache.
+- [ ] IMAP aktivieren, Zugangsdaten notieren (Host, Port 993, Benutzer,
+      Passwort bzw. App-Passwort)
+- [ ] Auf genügend Speicher achten. Läuft das Postfach in die Quota, weist der
+      Anbieter eingehende Mails ab und der Bot bekommt nichts mehr, ohne dass
+      ein Fehler auftritt.
 
-- [ ] **Homegate** — Suchabo mit Pseudo-Mail
-- [ ] **ImmoScout24** — Suchabo mit Pseudo-Mail
-- [ ] **newhome** — Suchabo mit Pseudo-Mail
-- [ ] **Flatfox** — Suchabo nur optional (Bot pollt eh direkt die API)
+Optional: Statt Passwort geht OAuth2/XOAUTH2 — `imap_auth.py` erkennt das
+automatisch, sobald die drei `WOHNUNGS_OAUTH_*`-Variablen gesetzt sind. Den
+Refresh-Token holt `python oauth_setup.py`.
 
-## Phase 4 — Gmail-Filter im Pseudo-Postfach
+## 3. Suchabos auf den Portalen
 
-- [ ] Filter erstellen: Absender enthält `homegate.ch` OR `immoscout24.ch` OR `newhome.ch` OR `flatfox.ch`
-- [ ] Aktion: Label `wohnung` zuweisen, Posteingang überspringen
-- [ ] Test: eine Mail von Hand reinwerfen → landet im Label
+Bei Homegate, ImmoScout24, newhome und Flatfox je ein Suchabo mit der
+Bot-Adresse als Empfänger.
 
-## Phase 5 — Code deployen
+- [ ] Abos **bewusst breit** fassen — das Feintuning macht der Bot, und dessen
+      Filter lassen sich per Chat-Befehl ändern, die Abos nicht.
+- [ ] Bestätigungs-/Aktivierungsmails zeitnah anklicken. Läuft der Bot schon,
+      löscht er sie beim nächsten Durchlauf mit den Alert-Mails weg.
+- [ ] Nach ein, zwei Tagen prüfen, ob von **jedem** Portal Mails ankommen.
+      Ein Abo, das nie bestätigt wurde, schweigt einfach.
 
-- [ ] Projekt-Ordner auf VPS hochladen (`scp` oder Git)
-- [ ] `python3 -m venv .venv && source .venv/bin/activate`
-- [ ] `pip install -r requirements.txt`
-- [ ] `config.py` ausfüllen:
-  - `TELEGRAM_BOT_TOKEN` (aus Phase 1)
-  - `TELEGRAM_CHAT_IDS = ["-100…"]` (Gruppen-ID, einzelner Eintrag reicht)
-  - IMAP-Block: Pseudo-Gmail + App-Passwort, `IMAP_FOLDER = "wohnung"`
-  - `APPLICANT`-Block: Kollegen-Daten aus Phase 2, `household = "wg"`, deinen Namen mit reinnehmen
-  - Suchkriterien grob — werden später per Telegram-Befehl überschrieben
+## 4. Installation
 
-## Phase 6 — Parser tunen
+```bash
+git clone https://github.com/claudiokoller/wohnungs-bot.git
+cd wohnungs-bot
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+```
 
-- [ ] `python main.py --dump-emails` ausführen
-- [ ] HTML-Dumps unter `./email_dumps/` durchschauen
-- [ ] Pro Portal eine Mail prüfen: extrahiert der Parser Preis, Zimmer, PLZ korrekt?
-- [ ] Falls nein: Regexe in `email_source.py` anpassen (mit Claude Code)
-- [ ] Erfolg = Probelauf zeigt sinnvolle Treffer
+## 5. Konfiguration
 
-## Phase 7 — Seed + erster Live-Lauf
+Zugangsdaten kommen in `.env` und gehören nie ins Git:
 
-- [ ] `python main.py --seed` → markiert alle aktuellen Inserate als "gesehen"
-- [ ] `python main.py` einmalig (sollte 0 neue Treffer melden)
-- [ ] Warte 1–2 Tage, sammle echte neue Inserate
-- [ ] `python main.py --loop` startet Dauerschleife
-- [ ] In tmux laufen lassen oder als systemd-Service einrichten (siehe unten)
+```bash
+cp .env.example .env
+```
 
-## Phase 8 — Command-Layer (`command.py`) bauen
+| Variable | Inhalt |
+|---|---|
+| `WOHNUNGS_BOT_TOKEN` | Token aus Schritt 1 |
+| `WOHNUNGS_IMAP_HOST` / `_PORT` | IMAP-Server, üblicherweise Port 993 |
+| `WOHNUNGS_IMAP_USER` / `_PASS` | Zugangsdaten aus Schritt 2 |
+| `WOHNUNGS_IMAP_FOLDER` | `INBOX`, oder ein eigener Ordner bei serverseitiger Sortierung |
+| `WOHNUNGS_DB` | absoluter Pfad zur SQLite-Datei |
 
-Hier kommt Claude Code in VS Code ins Spiel. Siehe `CLAUDE.md` für den
-Auftrag. Nach dem Bau:
+In `config.py` kommen die nicht-geheimen Dinge:
 
-- [ ] `python command.py` als zweiter Prozess parallel zu `main.py --loop`
-- [ ] In der Gruppe `/help` → Befehlsliste muss kommen
-- [ ] `/plz 8953,8957` → setzen, `/status` → bestätigen
-- [ ] `/now` → sofortiger Durchlauf, prüfen ob Filter greift
+- [ ] `TELEGRAM_CHAT_IDS` — die Gruppen-ID aus Schritt 1
+- [ ] `APPLICANT` — Name, Beruf, Telefon, Bezugstermin, `household`
+      (`single` / `paar` / `wg` / `familie`); daraus baut der Bot den
+      Bewerbungsentwurf
+- [ ] `SEARCH` — Startwerte für die Suchkriterien. Sie seeden nur den ersten
+      Start; danach führt die Datenbank, geändert wird per Telegram-Befehl
 
-## Phase 9 — Dauerbetrieb absichern
+## 6. Probelauf
 
-Zwei systemd-Services auf dem VPS:
+```bash
+python main.py --dump-emails   # zeigt geparste Inserate mit Flags pro Feld
+python main.py --seed          # markiert alles Vorhandene als gesehen
+python main.py                 # ein Durchlauf, sollte 0 neue Treffer melden
+```
+
+`--dump-emails` ist die Parser-Diagnose: Es markiert nichts als gelesen,
+löscht nichts und sendet nichts. Sieht ein Feld falsch aus, sind die Regexe
+in `email_source.py` die Stellschraube — Portale ändern ihre Mail-Templates.
+
+Dann den Command-Layer testen:
+
+```bash
+python command.py
+```
+
+In der Gruppe `/help` → die Befehlsliste muss kommen. `/plz 8953,8957`
+setzen, mit `/status` bestätigen, `/now` löst einen sofortigen Durchlauf aus.
+
+## 7. Dauerbetrieb mit systemd
+
+Zwei Services, weil die beiden Prozesse unterschiedlich ticken: Die Pipeline
+schläft zwischen den Durchläufen, das Long-Polling hängt dauerhaft an der
+Telegram-API.
 
 ```ini
 # /etc/systemd/system/wohnungs-bot.service
@@ -97,11 +113,11 @@ Description=Wohnungs-Bot Polling
 After=network.target
 
 [Service]
-WorkingDirectory=/home/USER/wohnungs-bot
-ExecStart=/home/USER/wohnungs-bot/.venv/bin/python main.py --loop
+WorkingDirectory=/opt/wohnungs-bot
+ExecStart=/opt/wohnungs-bot/.venv/bin/python main.py --loop
 Restart=always
 RestartSec=30
-EnvironmentFile=/home/USER/wohnungs-bot/.env
+EnvironmentFile=/opt/wohnungs-bot/.env
 
 [Install]
 WantedBy=multi-user.target
@@ -114,24 +130,34 @@ Description=Wohnungs-Bot Command Layer
 After=network.target
 
 [Service]
-WorkingDirectory=/home/USER/wohnungs-bot
-ExecStart=/home/USER/wohnungs-bot/.venv/bin/python command.py
+WorkingDirectory=/opt/wohnungs-bot
+ExecStart=/opt/wohnungs-bot/.venv/bin/python command.py
 Restart=always
 RestartSec=30
-EnvironmentFile=/home/USER/wohnungs-bot/.env
+EnvironmentFile=/opt/wohnungs-bot/.env
 
 [Install]
 WantedBy=multi-user.target
 ```
 
-- [ ] `.env` mit allen Tokens/Passwörtern (nicht ins Git!)
-- [ ] `systemctl enable --now wohnungs-bot wohnungs-bot-cmd`
-- [ ] Logs prüfen: `journalctl -u wohnungs-bot -f`
+```bash
+systemctl enable --now wohnungs-bot wohnungs-bot-cmd
+journalctl -u wohnungs-bot -f
+```
 
-## Phase 10 — Im Betrieb
+Optional automatisches Deployment: `.github/workflows/deploy.yml` kopiert den
+Code per SCP auf den Server und startet die Services neu. Der Workflow ist
+bewusst nur manuell auslösbar und braucht die Repository-Secrets
+`SSH_PRIVATE_KEY`, `SSH_HOST` und `SSH_USER`.
 
-- Erste Woche breit laufen lassen, Treffer beobachten
-- Per `/plz`, `/preis`, `/exclude` schrittweise eingrenzen
-- Bei Parser-Fehlern (Portal ändert Template): erneut `--dump-emails`,
-  Regex nachziehen
-- Monatlich kurz Logs checken
+## 8. Im Betrieb
+
+- Erste Woche breit laufen lassen, dann per `/preis`, `/plz`, `/zimmer` und
+  `/exclude` schrittweise eingrenzen.
+- Kommt nichts mehr, **nicht** sofort den Code verdächtigen. Die Reihenfolge:
+  Kommen überhaupt noch Mails an (`/health` zeigt pro Portal, wie viele Mails
+  in 24 Stunden kamen und wann die letzte eintraf)?
+  Passen die Suchabos noch zum Filter? Erst dann der Parser.
+- Der Bot überwacht sich selbst: Er meldet sich, wenn insgesamt oder von einer
+  einzelnen Quelle über längere Zeit keine Mail mehr eintrifft, und eskaliert
+  wiederholte Login-Fehler statt sie endlos als vorübergehend zu behandeln.
