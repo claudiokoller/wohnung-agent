@@ -5,14 +5,14 @@
 
 Ein Telegram-Bot, der Mietinserate aus vier Schweizer Immobilienportalen in
 einen gemeinsamen Chat bündelt: filtert nach eigenen Kriterien, entfernt
-Duplikate über Portalgrenzen hinweg und schreibt zu jedem Treffer einen
-fertigen Bewerbungsentwurf.
+Duplikate über Portalgrenzen hinweg und legt zu jedem Treffer einen fertigen
+Bewerbungsentwurf dazu.
 
 Gebaut für eine 2er-WG-Suche in der Region Zürich und dort von Mai bis
-September 2026 durchgehend produktiv gelaufen — auf einem eigenen VPS, mit
-automatischem Deployment. Danach pausiert: Wohnung gefunden.
+September 2026 durchgehend auf einem eigenen Server gelaufen. Danach
+pausiert: Wohnung gefunden.
 
-> Python 3.10+ · SQLite · IMAP · Telegram Bot API · systemd · GitHub Actions
+> Python · SQLite · IMAP · Telegram Bot API · GitHub Actions
 > · keine Frameworks · ~4'800 Zeilen · 60 Unit-Tests
 
 <!-- Screenshot: Datei als docs/bilder/telegram-feed.png ablegen und die
@@ -22,107 +22,75 @@ automatischem Deployment. Danach pausiert: Wohnung gefunden.
 ![Ein Inserat im Telegram-Feed mit Inline-Buttons und Bewerbungsentwurf](docs/bilder/telegram-feed.png)
 -->
 
----
-
 ## Das Problem
 
-Wer in Zürich eine Wohnung sucht, hat Suchabos bei Homegate, ImmoScout24,
-newhome und Flatfox — und damit vier Mailfluten, in denen dieselben Inserate
-mehrfach auftauchen, viele gar nicht zu den eigenen Kriterien passen und die
-interessanten untergehen. Zu zweit suchen heisst zusätzlich: beide müssen
-denselben Stand haben.
+Wer in Zürich sucht, hat Suchabos bei vier Portalen — und damit vier
+Mailfluten, in denen dieselben Inserate mehrfach auftauchen und die
+interessanten untergehen. Zu zweit suchen heisst zusätzlich: beide brauchen
+denselben Stand.
 
-Der Bot dreht das um. Ein Kanal, ein Feed, keine Duplikate, Filter jederzeit
-per Chat-Befehl änderbar.
+Der Bot macht daraus einen Kanal, ohne Duplikate, mit Filtern, die sich per
+Chat-Befehl ändern lassen.
 
 ## Architektur
 
 ```mermaid
 flowchart LR
-    subgraph Portale
-        HG[Homegate]
-        IS[ImmoScout24]
-        NH[newhome]
-        FF[Flatfox]
-    end
-
-    HG & IS & NH & FF -->|Suchabo-Mails| MB[(IMAP-Postfach)]
-    MB --> ES["email_source.py<br/>HTML-Parser"]
-    ES --> LI["Listing-Objekte"]
-    LI --> DEDUP{"db.py<br/>Dedup"}
-    DEDUP -->|bekannt| X["verworfen"]
-    DEDUP -->|neu| FILT{"apply_filter<br/>Preis, Zimmer, PLZ, m²"}
-    FILT -->|passt nicht| LOG["Grund ins Log"]
-    FILT -->|Treffer| NO["notify.py"]
-    NO --> TG(["Telegram-Gruppe"])
-    NO --> AP["application.py<br/>Bewerbungsentwurf"]
-    AP --> TG
-
-    CMD["command.py<br/>Long-Polling"] <-->|Befehle| TG
-    CMD <--> DB[("SQLite<br/>Filter-State + Inserate")]
-    DEDUP <--> DB
-    FILT <--> DB
+    P["4 Portale<br/>Suchabo-Mails"] --> M[(Postfach)]
+    M --> B["Bot<br/>parsen · Duplikate raus · filtern"]
+    B --> T(["Telegram-Gruppe"])
+    B <--> D[("SQLite<br/>Inserate + Filter")]
+    T -->|"/preis 2400"| B
 ```
 
-**Details zur Architektur, den Datenflüssen und den technischen Entscheiden:
-[docs/architektur.md](docs/architektur.md)**
+Die Portale schicken ihre Suchabo-Mails an ein eigenes Postfach. Der Bot holt
+sie per IMAP ab, liest Preis, Zimmer, Fläche und Ort aus dem HTML, wirft
+bereits gesehene Inserate weg, prüft den Rest gegen die Filter und schickt
+die Treffer in die Gruppe. Die Filter liegen in SQLite und sind jederzeit per
+Chat-Befehl änderbar.
 
-## Technische Entscheide
+Mehr Details — Ablauf eines Durchlaufs, Datenmodell, Selbstüberwachung:
+[docs/architektur.md](docs/architektur.md)
 
-**Suchabo-Mails statt Scraping.** Die Portale sind hinter Cloudflare und
-verbieten Scraping in den AGB. Ihre eigenen Suchabo-Mails liefern dieselben
-Treffer freiwillig und legal — und die Portale filtern schon vor. Kein
-Bot-Schutz zu umgehen, keine Scraper-Wartung bei jedem Redesign.
+## Warum so gebaut
 
-**Dedup über Portalgrenzen.** Dasselbe Inserat kommt oft von drei Portalen.
-Der Bot löst die Tracking-Redirects auf, um an die echte Listing-ID zu
-kommen (stabiler Schlüssel), und fällt auf einen Inhalts-Fingerprint
-zurück, wenn das nicht klappt.
-
-**Die Datenbank führt, nicht die Config.** Filter sind zur Laufzeit per
-Telegram änderbar (`/preis 2400`). `config.SEARCH` seedet nur den ersten
-Start, danach ist die SQLite-Tabelle die einzige Wahrheit — sonst driften
-zwei Filterstände auseinander.
-
-**Bewerbungsentwurf ohne LLM.** Ein deterministisches Template aus dem
-Bewerberprofil. Verlässlich, kostenlos, keine Halluzination in einem Text,
-der an einen Vermieter geht. Verschickt wird nichts automatisch: die
-Empfängeradresse steht fast nie im Inserat, der Kontakt läuft übers
-Portalformular. Der Bot liefert den fertigen Text, absenden macht der Mensch.
-
-**Verworfene Inserate hinterlassen eine Spur.** Wenn nichts durchkommt, sieht
-"Filter zu eng", "Suchabo zu breit" und "Parser gebrochen" im Log sonst
-identisch aus. Deshalb protokolliert der Bot zu jedem verworfenen Inserat den
-Grund und die Verteilung: `5 von 6 verworfen (2× PLZ, 1× Fläche, 1× Preis)`.
+- **Suchabo-Mails statt Scraping.** Die Portale sind hinter Cloudflare und
+  verbieten Scraping. Ihre eigenen Mails liefern dieselben Treffer freiwillig.
+- **Dedup über Portalgrenzen.** Dasselbe Inserat kommt oft dreifach. Der Bot
+  löst die Tracking-Links auf, um an die echte Listing-ID zu kommen, und
+  nutzt sonst einen Fingerprint aus Adresse, Preis, Zimmern und Fläche.
+- **Die Datenbank führt, nicht die Config.** `/preis 2400` gilt sofort und
+  überlebt Neustart und Deployment. Sonst driften zwei Filterstände auseinander.
+- **Bewerbungsentwurf ohne LLM.** Ein festes Template ist für einen Text, der
+  an einen Vermieter geht, verlässlicher. Abgeschickt wird nichts automatisch.
 
 ## Telegram-Befehle
 
 | Bereich | Befehle |
 |---|---|
-| Filter | `/preis` · `/zimmer` · `/plz` (mit Gemeindenamen statt PLZ) · `/exclude` · `/pause` · `/resume` |
+| Filter | `/preis` · `/zimmer` · `/plz` (auch mit Gemeindenamen) · `/exclude` · `/pause` · `/resume` |
 | Inserate | `/liste` · `/delete` · `/now` |
-| Status | `/status` (Filter) · `/stats` (Zahlen) · `/portale` (Quellen) · `/help` |
-| Betrieb | `/health` (Zustand pro Portal) · `/backup` (DB-Backup) |
+| Status | `/status` · `/stats` · `/portale` · `/help` |
+| Betrieb | `/health` (Zustand pro Portal) · `/backup` |
 
-Jedes Inserat kommt mit Inline-Buttons: ⭐ Merken und 📝 Entwurf. Um 20:00
-Zürich-Zeit fasst der Bot die gemerkten Inserate des Tages zusammen.
+Jedes Inserat kommt mit zwei Buttons: ⭐ Merken und 📝 Entwurf. Um 20:00 fasst
+der Bot die gemerkten Inserate des Tages zusammen.
 
 ## Betrieb: was schiefging
 
-Der interessanteste Teil des Projekts war nicht das Bauen, sondern die vier
-Monate danach. Drei Ausfälle, jeder still — der Bot lief fehlerfrei weiter
-und schickte einfach nichts mehr:
+Der lehrreichste Teil waren die vier Monate nach dem Bauen. Drei Ausfälle,
+jeder still — der Bot lief fehlerfrei weiter und schickte einfach nichts mehr:
 
 | Ausfall | Ursache | Konsequenz im Code |
 |---|---|---|
-| Feed 9 Tage leer | Postfach-Quota voll, Provider wies eingehende Mails ab | Verarbeitete Mails werden gelöscht statt nur als gelesen markiert |
-| Feed 2 Wochen leer | Mailkonto gesperrt, IMAP-Login abgelehnt | Eskalation bei Fehler-Streaks statt endlosem Retry als "transient" |
-| Feed leer trotz Mails | Suchabos breiter gefasst als der Bot-Filter | Verwerfungsgrund pro Inserat im Log |
+| Feed 9 Tage leer | Postfach-Quota voll, Provider wies Mails ab | Verarbeitete Mails werden gelöscht, nicht nur als gelesen markiert |
+| Feed 2 Wochen leer | Mailkonto gesperrt, IMAP-Login abgelehnt | Wiederholte Fehler eskalieren statt endlos als "transient" zu gelten |
+| Feed leer trotz Mails | Suchabos breiter als der Bot-Filter | Verwerfungsgrund pro Inserat im Log |
 
 Die Lehre: Ein Bot, der Nachrichten weiterleitet, meldet seinen eigenen
 Ausfall nicht — Stille sieht aus wie "nichts Passendes dabei". Deshalb
-überwacht er inzwischen den Maileingang pro Portal und meldet sich selbst,
-wenn eine Quelle verstummt.
+überwacht er heute den Maileingang pro Portal und meldet sich selbst, wenn
+eine Quelle verstummt.
 
 ## Setup
 
@@ -131,20 +99,16 @@ git clone https://github.com/claudiokoller/wohnungs-bot.git
 cd wohnungs-bot
 pip install -r requirements.txt
 
-cp .env.example .env        # Bot-Token, IMAP-Zugang, DB-Pfad eintragen
-# Suchkriterien und Bewerberprofil in config.py anpassen
+cp .env.example .env        # Bot-Token, IMAP-Zugang, DB-Pfad
+# Suchkriterien und Profil in config.py anpassen
 
-python main.py --seed       # Altinserate als gesehen markieren, nichts senden
+python main.py --seed       # Altinserate als gesehen markieren
 python main.py --loop       # Dauerbetrieb, Poll alle 15 Minuten
 python command.py           # Telegram-Befehle (zweiter Prozess)
-```
-
-Ausführliche Schritt-für-Schritt-Anleitung inklusive Telegram-Gruppe, IMAP
-und systemd: [SETUP.md](SETUP.md).
-
-```bash
 python test_command.py      # 60 Tests, ohne pytest lauffähig
 ```
+
+Vollständige Anleitung mit Postfach, Suchabos und systemd: [SETUP.md](SETUP.md).
 
 ## Module
 
@@ -153,15 +117,14 @@ python test_command.py      # 60 Tests, ohne pytest lauffähig
 | `main.py` | Orchestrierung: `--seed`, `--loop`, `--dump-emails` |
 | `email_source.py` | IMAP-Quelle: Alert-Mails → `Listing` |
 | `sources.py` | `Listing`-Datentyp + Telegram-Formatierung |
-| `db.py` | SQLite: Dedup, Filter-State, Merkliste, Mail-Log |
-| `command.py` | Telegram Long-Polling, alle Befehle, Tagesübersicht |
-| `notify.py` | Telegram-Versand mit Inline-Buttons |
+| `db.py` | SQLite: Dedup, Filter, Merkliste, Mail-Log |
+| `command.py` | Telegram-Befehle, Tagesübersicht |
+| `notify.py` | Versand mit Inline-Buttons |
 | `application.py` | Bewerbungsvorlage |
 | `plz_lookup.py` | PLZ ↔ Gemeindename, 162 Gemeinden Kanton Zürich |
-| `imap_auth.py` | Login providerneutral (Passwort oder OAuth2/XOAUTH2) |
+| `imap_auth.py` | Login providerneutral (Passwort oder OAuth2) |
 
 ## Lizenz
 
-MIT — siehe [LICENSE](LICENSE). Die Suchkriterien und das Bewerberprofil in
-`config.py` sind Platzhalter; echte Zugangsdaten gehören in `.env` und sind
-nie Teil dieses Repos.
+MIT — siehe [LICENSE](LICENSE). Profil und Suchkriterien in `config.py` sind
+Platzhalter; echte Zugangsdaten gehören in `.env` und nie ins Repo.
