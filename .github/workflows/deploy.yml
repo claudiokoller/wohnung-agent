@@ -3,6 +3,7 @@
 # ungefragt die Services auf dem Server neu startet.
 #
 # Benötigt die Repository-Secrets SSH_PRIVATE_KEY, SSH_HOST, SSH_USER.
+# Die Tests aus ci.yml laufen vorgeschaltet und müssen grün sein.
 
 name: Deploy to VPS
 
