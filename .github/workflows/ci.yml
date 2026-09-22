@@ -5,6 +5,7 @@ on:
     branches: [master]
   pull_request:
   workflow_dispatch:
+  workflow_call:      # wird vom Deploy-Workflow vorgeschaltet
 
 jobs:
   test:
