@@ -35,8 +35,8 @@ Auf dem Server laufen zwei systemd-Services: `main.py --loop` für die
 Pipeline und `command.py` für das Telegram-Long-Polling. Getrennt, weil sie
 unterschiedlich ticken — die Pipeline schläft zwischen den Durchläufen, das
 Long-Polling hängt dauerhaft an der API. Stirbt einer, läuft der andere
-weiter. Gemeinsamer Zustand liegt nur in SQLite, kein Shared Memory, keine
-Queue.
+weiter. Alles, was beide wissen müssen, steht in der Datenbank — sie tauschen
+untereinander nichts aus.
 
 Deployment über GitHub Actions: Tests, dann SCP auf den Server, dann Services
 neu starten.
@@ -63,12 +63,12 @@ tot ist.
 
 Dasselbe Inserat erreicht den Bot oft dreifach. Zwei Stufen:
 
-1. **Listing-ID des Portals.** Die Links in den Mails sind
-   Tracking-Redirects; der Bot löst sie parallel auf und gewinnt daraus die
-   echte ID. Stabilster Schlüssel.
-2. **Fingerprint.** Scheitert Schritt 1, wird aus Adresse, Preis, Zimmerzahl
-   und Fläche ein Hash gebildet. Fängt dasselbe Inserat auch dann, wenn zwei
-   Portale unterschiedliche IDs vergeben.
+1. **Inserat-Nummer des Portals.** Die Links in den Mails führen über einen
+   Zähldienst des Versenders. Der Bot folgt ihnen und liest am Ziel die
+   Nummer des Inserats ab. Das ist das zuverlässigste Merkmal.
+2. **Vergleich der Eckdaten.** Klappt Schritt 1 nicht, vergleicht der Bot
+   Adresse, Preis, Zimmerzahl und Fläche. Damit erkennt er dasselbe Inserat
+   auch dann, wenn zwei Portale unterschiedliche Nummern vergeben.
 
 ## Filter-Prinzip
 
@@ -97,8 +97,8 @@ ist. Drei Wächter:
 
 - **Kein Scraping der Portalseiten.** Cloudflare davor, AGB dagegen, und die
   Suchabo-Mails liefern dieselben Daten freiwillig.
-- **Kein LLM pro Inserat.** Ein festes Template ist verlässlicher und kostet
-  nichts.
+- **Kein Sprachmodell pro Inserat.** Ein festes Textgerüst ist verlässlicher
+  und kostet nichts.
 - **Kein automatischer Versand.** Die Empfängeradresse steht fast nie im
   Inserat; der Kontakt läuft über das Formular des Portals.
 - **Kein Framework.** Standard-Library plus `requests` und `beautifulsoup4`.

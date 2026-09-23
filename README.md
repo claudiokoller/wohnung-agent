@@ -4,16 +4,16 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 Ein Telegram-Bot, der Mietinserate aus vier Schweizer Immobilienportalen in
-einen gemeinsamen Chat bündelt: filtert nach eigenen Kriterien, entfernt
-Duplikate über Portalgrenzen hinweg und legt zu jedem Treffer einen fertigen
-Bewerbungsentwurf dazu.
+einen gemeinsamen Chat bündelt: filtert nach eigenen Kriterien, erkennt
+Inserate wieder, die auf mehreren Portalen stehen, und legt zu jedem Treffer
+einen fertigen Bewerbungsentwurf dazu.
 
-Gebaut für eine 2er-WG-Suche in der Region Zürich und dort von Mai bis
-September 2026 durchgehend auf einem eigenen Server gelaufen. Danach
-pausiert: Wohnung gefunden.
+Gebaut für eine WG-Suche zu zweit in der Region Zürich, gelaufen von Ende
+Mai bis Mitte September 2026 auf einem eigenen Server. Danach pausiert:
+Wohnung gefunden.
 
 > Python · SQLite · IMAP · Telegram Bot API · GitHub Actions
-> · keine Frameworks · ~4'800 Zeilen · 60 Unit-Tests
+> · keine Frameworks · rund 4'600 Zeilen · 60 Tests
 
 <!-- Screenshot: Datei als docs/bilder/telegram-feed.png ablegen und die
      folgende Zeile einkommentieren. Vorher Gruppennamen, Mitgliederliste und
@@ -56,13 +56,15 @@ Mehr Details — Ablauf eines Durchlaufs, Datenmodell, Selbstüberwachung:
 
 - **Suchabo-Mails statt Scraping.** Die Portale sind hinter Cloudflare und
   verbieten Scraping. Ihre eigenen Mails liefern dieselben Treffer freiwillig.
-- **Dedup über Portalgrenzen.** Dasselbe Inserat kommt oft dreifach. Der Bot
-  löst die Tracking-Links auf, um an die echte Listing-ID zu kommen, und
-  nutzt sonst einen Fingerprint aus Adresse, Preis, Zimmern und Fläche.
-- **Die Datenbank führt, nicht die Config.** `/preis 2400` gilt sofort und
-  überlebt Neustart und Deployment. Sonst driften zwei Filterstände auseinander.
-- **Bewerbungsentwurf ohne LLM.** Ein festes Template ist für einen Text, der
-  an einen Vermieter geht, verlässlicher. Abgeschickt wird nichts automatisch.
+- **Duplikate erkennen.** Dasselbe Inserat kommt oft von drei Portalen. Der
+  Bot folgt den Weiterleitungslinks aus den Mails bis zur Inserat-Nummer des
+  Portals. Geht das nicht, vergleicht er Adresse, Preis, Zimmer und Fläche.
+- **Filter in der Datenbank statt im Code.** `/preis 2400` gilt sofort und
+  übersteht Neustarts. Stünden die Werte zusätzlich im Code, hätte man zwei
+  Stände, die auseinanderlaufen.
+- **Bewerbungsentwurf ohne Sprachmodell.** Ein festes Textgerüst ist für
+  einen Brief an einen Vermieter verlässlicher. Abgeschickt wird nichts
+  automatisch — den Text kopiert man selbst ins Portalformular.
 
 ## Telegram-Befehle
 
@@ -78,13 +80,13 @@ der Bot die gemerkten Inserate des Tages zusammen.
 
 ## Betrieb: was schiefging
 
-Der lehrreichste Teil waren die vier Monate nach dem Bauen. Drei Ausfälle,
-jeder still — der Bot lief fehlerfrei weiter und schickte einfach nichts mehr:
+Lehrreicher als das Bauen war der Betrieb danach. Drei Ausfälle, jeder
+still — der Bot lief fehlerfrei weiter und schickte einfach nichts mehr:
 
 | Ausfall | Ursache | Konsequenz im Code |
 |---|---|---|
 | Feed 9 Tage leer | Postfach-Quota voll, Provider wies Mails ab | Verarbeitete Mails werden gelöscht, nicht nur als gelesen markiert |
-| Feed 2 Wochen leer | Mailkonto gesperrt, IMAP-Login abgelehnt | Wiederholte Fehler eskalieren statt endlos als "transient" zu gelten |
+| Feed 2 Wochen leer | Mailkonto gesperrt, Login abgelehnt | Wiederholte Fehler melden statt sie endlos für vorübergehend zu halten |
 | Feed leer trotz Mails | Suchabos breiter als der Bot-Filter | Verwerfungsgrund pro Inserat im Log |
 
 Die Lehre: Ein Bot, der Nachrichten weiterleitet, meldet seinen eigenen
@@ -121,8 +123,8 @@ Vollständige Anleitung mit Postfach, Suchabos und systemd: [SETUP.md](SETUP.md)
 | `command.py` | Telegram-Befehle, Tagesübersicht |
 | `notify.py` | Versand mit Inline-Buttons |
 | `application.py` | Bewerbungsvorlage |
-| `plz_lookup.py` | PLZ ↔ Gemeindename, 162 Gemeinden Kanton Zürich |
-| `imap_auth.py` | Login providerneutral (Passwort oder OAuth2) |
+| `plz_lookup.py` | Postleitzahl ↔ Gemeindename, Kanton Zürich |
+| `imap_auth.py` | Anmeldung am Postfach, unabhängig vom Anbieter |
 
 ## Lizenz
 

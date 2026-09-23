@@ -1,5 +1,5 @@
 """
-PLZ-Lookup für Kanton Zürich — alle 162 Gemeinden.
+PLZ-Lookup für den Kanton Zürich (163 Gemeindenamen, 256 Postleitzahlen).
 
 Quelle: GeoNames Switzerland (CC BY 4.0), gefiltert auf Kanton ZH.
 Gemeindename → alle zugehörigen PLZ-Codes.
