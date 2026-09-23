@@ -408,7 +408,7 @@ def _status_text() -> str:
 
 def _help_text() -> str:
     return (
-        "🤖 <b>Wohnungs-Bot Befehle</b>\n\n"
+        "🤖 <b>Wohnung-Agent Befehle</b>\n\n"
         "<b>Filter:</b>\n"
         "/preis 2500 — Maximalpreis CHF\n"
         "/zimmer 2.5-4 — Zimmer-Range\n"

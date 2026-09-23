@@ -1,6 +1,6 @@
-# Wohnungs-Bot Zürich
+# Wohnung-Agent Zürich
 
-[![Tests](https://github.com/claudiokoller/wohnungs-bot/actions/workflows/ci.yml/badge.svg)](https://github.com/claudiokoller/wohnungs-bot/actions/workflows/ci.yml)
+[![Tests](https://github.com/claudiokoller/wohnung-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/claudiokoller/wohnung-agent/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 Ein Telegram-Bot, der Mietinserate aus vier Schweizer Immobilienportalen in
@@ -95,8 +95,8 @@ eine Quelle verstummt.
 ## Setup
 
 ```bash
-git clone https://github.com/claudiokoller/wohnungs-bot.git
-cd wohnungs-bot
+git clone https://github.com/claudiokoller/wohnung-agent.git
+cd wohnung-agent
 pip install -r requirements.txt
 
 cp .env.example .env        # Bot-Token, IMAP-Zugang, DB-Pfad

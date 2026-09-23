@@ -1,4 +1,4 @@
-# Wohnungs-Bot Zürich-Region — Projekt-Kontext für Claude Code
+# Wohnung-Agent Zürich-Region — Projekt-Kontext für Claude Code
 
 Diese Datei wird von Claude Code automatisch als Kontext geladen.
 
@@ -111,9 +111,9 @@ paused, last_activity
 
 ## Infrastruktur
 
-- VPS (Ubuntu), Pfad `/root/wohnungs-bot/` — Host/User liegen in den GitHub-Secrets, nicht im Repo
+- VPS (Ubuntu), Pfad `/root/wohnung-agent/` — Host/User liegen in den GitHub-Secrets, nicht im Repo
 - Deploy: GitHub Actions (manuell ausgelöst) → Tests → SCP auf VPS → Services neu starten
-- Services: `wohnungs-bot.service` (main --loop) + `wohnungs-bot-cmd.service` (command.py)
+- Services: `wohnung-agent.service` (main --loop) + `wohnung-agent-cmd.service` (command.py)
 - `.env` auf VPS (nie ins Git): `WOHNUNGS_BOT_TOKEN`, IMAP-Zugangsdaten, `WOHNUNGS_DB`
 
 ## Anweisungen für Claude Code

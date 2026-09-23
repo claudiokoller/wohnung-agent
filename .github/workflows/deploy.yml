@@ -31,10 +31,10 @@ jobs:
         run: |
           scp -i ~/.ssh/deploy_key \
             *.py requirements.txt \
-            ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:/root/wohnungs-bot/
+            ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:/root/wohnung-agent/
 
       - name: Services neu starten
         run: |
           ssh -i ~/.ssh/deploy_key ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} \
-            "systemctl restart wohnungs-bot wohnungs-bot-cmd && \
-             systemctl status wohnungs-bot wohnungs-bot-cmd --no-pager"
+            "systemctl restart wohnung-agent wohnung-agent-cmd && \
+             systemctl status wohnung-agent wohnung-agent-cmd --no-pager"

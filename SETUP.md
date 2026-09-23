@@ -48,8 +48,8 @@ Bot-Adresse als Empfänger.
 ## 4. Installation
 
 ```bash
-git clone https://github.com/claudiokoller/wohnungs-bot.git
-cd wohnungs-bot
+git clone https://github.com/claudiokoller/wohnung-agent.git
+cd wohnung-agent
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 ```
@@ -107,42 +107,42 @@ schläft zwischen den Durchläufen, das Long-Polling hängt dauerhaft an der
 Telegram-API.
 
 ```ini
-# /etc/systemd/system/wohnungs-bot.service
+# /etc/systemd/system/wohnung-agent.service
 [Unit]
-Description=Wohnungs-Bot Polling
+Description=Wohnung-Agent Polling
 After=network.target
 
 [Service]
-WorkingDirectory=/opt/wohnungs-bot
-ExecStart=/opt/wohnungs-bot/.venv/bin/python main.py --loop
+WorkingDirectory=/opt/wohnung-agent
+ExecStart=/opt/wohnung-agent/.venv/bin/python main.py --loop
 Restart=always
 RestartSec=30
-EnvironmentFile=/opt/wohnungs-bot/.env
+EnvironmentFile=/opt/wohnung-agent/.env
 
 [Install]
 WantedBy=multi-user.target
 ```
 
 ```ini
-# /etc/systemd/system/wohnungs-bot-cmd.service
+# /etc/systemd/system/wohnung-agent-cmd.service
 [Unit]
-Description=Wohnungs-Bot Command Layer
+Description=Wohnung-Agent Command Layer
 After=network.target
 
 [Service]
-WorkingDirectory=/opt/wohnungs-bot
-ExecStart=/opt/wohnungs-bot/.venv/bin/python command.py
+WorkingDirectory=/opt/wohnung-agent
+ExecStart=/opt/wohnung-agent/.venv/bin/python command.py
 Restart=always
 RestartSec=30
-EnvironmentFile=/opt/wohnungs-bot/.env
+EnvironmentFile=/opt/wohnung-agent/.env
 
 [Install]
 WantedBy=multi-user.target
 ```
 
 ```bash
-systemctl enable --now wohnungs-bot wohnungs-bot-cmd
-journalctl -u wohnungs-bot -f
+systemctl enable --now wohnung-agent wohnung-agent-cmd
+journalctl -u wohnung-agent -f
 ```
 
 Optional automatisches Deployment: `.github/workflows/deploy.yml` kopiert den

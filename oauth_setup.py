@@ -68,7 +68,7 @@ def main():
     print(f"WOHNUNGS_OAUTH_CLIENT_SECRET={data.get('client_secret', '')}")
     print(f"WOHNUNGS_OAUTH_REFRESH_TOKEN={creds.refresh_token}")
     print("=" * 60)
-    print("Danach: systemctl restart wohnungs-bot wohnungs-bot-cmd")
+    print("Danach: systemctl restart wohnung-agent wohnung-agent-cmd")
 
 
 if __name__ == "__main__":

@@ -1,5 +1,5 @@
 """
-Wohnungs-Bot Zürich.
+Wohnung-Agent Zürich.
 
 Modi:
   python main.py                einmal laufen (gut für cron)
@@ -107,7 +107,7 @@ def _stuck_alert(name: str, err, streak: int):
         "failure».\n\n"
         "Prüfen: Login auf office.mailbox.org, danach ggf. "
         "<code>WOHNUNGS_IMAP_PASS</code> in der <code>.env</code> auf dem VPS "
-        "korrigieren und <code>systemctl restart wohnungs-bot wohnungs-bot-cmd</code>.\n\n"
+        "korrigieren und <code>systemctl restart wohnung-agent wohnung-agent-cmd</code>.\n\n"
         f"Fehler: {err}",
     )
     _last_stuck_alert = now
@@ -132,7 +132,7 @@ def _auth_alert(err):
         "Zugangsdaten prüfen: in der <code>.env</code> auf dem VPS "
         "<code>WOHNUNGS_IMAP_USER</code>/<code>WOHNUNGS_IMAP_PASS</code> (mailbox.org-"
         "Passwort) korrigieren und Services neu starten "
-        "(<code>systemctl restart wohnungs-bot wohnungs-bot-cmd</code>).\n\n"
+        "(<code>systemctl restart wohnung-agent wohnung-agent-cmd</code>).\n\n"
         f"Fehler: {err}",
     )
     _last_auth_alert = now
