@@ -1,9 +1,9 @@
 # Wohnung Agent
 
-Ein Telegram-Bot, der Mietinserate aus vier Schweizer Immobilienportalen in
-einen gemeinsamen Chat bündelt: filtert nach eigenen Kriterien, erkennt
-Inserate wieder, die auf mehreren Portalen stehen, und legt zu jedem Treffer
-einen fertigen Bewerbungsentwurf dazu.
+Bündelt Mietinserate aus vier Schweizer Immobilienportalen in einen gemeinsamen
+Telegram-Chat: filtert nach eigenen Kriterien, erkennt Inserate wieder, die auf
+mehreren Portalen stehen, und legt zu jedem Treffer einen fertigen
+Bewerbungsentwurf dazu.
 
 Gebaut für eine WG-Suche zu zweit in der Region Zürich, gelaufen von Ende
 Mai bis Mitte September 2026 auf einem eigenen Server. Danach pausiert:
@@ -15,7 +15,7 @@ Wohnung gefunden.
 
 ## Das Problem
 
-Wer in Zürich sucht, hat Suchabos bei vier Portalen — und damit vier
+Wer in Zürich sucht, hat Suchabos bei vier Portalen – und damit vier
 Mailfluten, in denen dieselben Inserate mehrfach auftauchen und die
 interessanten untergehen. Zu zweit suchen heisst zusätzlich: beide brauchen
 denselben Stand.
@@ -23,7 +23,7 @@ denselben Stand.
 Der Bot macht daraus einen Kanal, ohne Duplikate, mit Filtern, die sich per
 Chat-Befehl ändern lassen.
 
-## Was der Bot macht
+## Was es macht
 
 1. **Abholen** – die Suchabo-Mails der vier Portale landen in einem eigenen
    Postfach und werden per IMAP abgeholt.
@@ -67,8 +67,7 @@ sie per IMAP ab, liest Preis, Zimmer, Fläche und Ort aus dem HTML, wirft
 bereits gesehene Inserate weg, prüft den Rest gegen die Filter und schickt
 die Treffer in die Gruppe.
 
-Mehr Details — Ablauf eines Durchlaufs, Datenmodell, Selbstüberwachung:
-[docs/architecture.md](docs/architecture.md)
+Mehr Details: [docs/architecture.md](docs/architecture.md)
 
 ## Telegram-Befehle
 
@@ -135,12 +134,12 @@ python test_command.py
   Stände, die auseinanderlaufen.
 - **Bewerbungsentwurf ohne Sprachmodell.** Ein festes Textgerüst ist für
   einen Brief an einen Vermieter verlässlicher. Abgeschickt wird nichts
-  automatisch — den Text kopiert man selbst ins Portalformular.
+  automatisch – den Text kopiert man selbst ins Portalformular.
 
 ## Betrieb: was schiefging
 
 Lehrreicher als das Bauen war der Betrieb danach. Drei Ausfälle, jeder
-still — der Bot lief fehlerfrei weiter und schickte einfach nichts mehr:
+still – der Bot lief fehlerfrei weiter und schickte einfach nichts mehr:
 
 | Ausfall | Ursache | Konsequenz im Code |
 |---|---|---|
@@ -149,11 +148,11 @@ still — der Bot lief fehlerfrei weiter und schickte einfach nichts mehr:
 | Feed leer trotz Mails | Suchabos breiter als der Bot-Filter | Verwerfungsgrund pro Inserat im Log |
 
 Die Lehre: Ein Bot, der Nachrichten weiterleitet, meldet seinen eigenen
-Ausfall nicht — Stille sieht aus wie „nichts Passendes dabei". Deshalb
+Ausfall nicht – Stille sieht aus wie „nichts Passendes dabei". Deshalb
 überwacht er heute den Maileingang pro Portal und meldet sich selbst, wenn
 eine Quelle verstummt.
 
 ## Lizenz
 
-MIT — siehe [LICENSE](LICENSE). Profil und Suchkriterien in `config.py` sind
+MIT – siehe [LICENSE](LICENSE). Profil und Suchkriterien in `config.py` sind
 Platzhalter; echte Zugangsdaten gehören in `.env` und nie ins Repo.
